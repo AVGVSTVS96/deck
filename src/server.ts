@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import type { BunRequest } from "bun";
 import app from "../web/index.html";
@@ -43,9 +44,22 @@ async function watchAll() {
   events.watch(join(config.claude, "plugins"), { type: "plugins" }, { only: /^installed_plugins\.json$/ });
 }
 
+const ownHosts = new Set([config.host, hostname(), "localhost", "127.0.0.1"].map((name) => `${name}:${config.port}`));
+
+function trusted(req: Request) {
+  const host = req.headers.get("host") ?? "";
+  const origin = req.headers.get("origin");
+
+  return ownHosts.has(host) && (origin ? origin === `http://${host}` : req.method === "GET" || req.method === "HEAD");
+}
+
+const forbidden = () => Response.json({ error: "forbidden" }, { status: 403 });
+
 const json =
   <T>(handler: (req: BunRequest) => Promise<T> | T) =>
   async (req: BunRequest) => {
+    if (!trusted(req)) return forbidden();
+
     try {
       return Response.json((await handler(req)) ?? { ok: true });
     } catch (error) {
@@ -85,7 +99,7 @@ const server = Bun.serve({
   development: process.env.NODE_ENV !== "production",
   routes: {
     "/": app,
-    "/api/events": () => events.stream(),
+    "/api/events": (req) => (trusted(req) ? events.stream() : forbidden()),
     "/api/repos": json(() => Promise.all(config.repos.map((repo) => repos.summary(repo)))),
     "/api/repos/:repo/workspaces": {
       POST: json(async (req) => {
