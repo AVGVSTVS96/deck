@@ -24,7 +24,7 @@ async function watchAll() {
     events.watch(
       join(repo.path, ".git"),
       { type: "repo", repo: repo.id },
-      { recursive: true, only: /^(index|HEAD|refs|logs|COMMIT_EDITMSG|ORIG_HEAD)/ },
+      { recursive: true, only: /^(index|HEAD|refs\/(?!t3\/)|logs|COMMIT_EDITMSG|ORIG_HEAD)(?!.*\.lock$)/ },
     );
   }
 
@@ -54,6 +54,40 @@ function trusted(req: Request) {
 }
 
 const forbidden = () => Response.json({ error: "forbidden" }, { status: 403 });
+
+function cached<T>(build: () => Promise<T>, maxAge: number) {
+  let value: Promise<T> | null = null;
+  let at = 0;
+
+  const fresh = () => {
+    const next = build();
+
+    at = Date.now();
+    value = next;
+    next.catch(() => value === next && (value = null));
+
+    return next;
+  };
+
+  return { get: () => (value && Date.now() - at < maxAge ? value : fresh()), fresh };
+}
+
+function sharing<T>(build: (req: BunRequest) => Promise<T>) {
+  const running = new Map<string, Promise<T>>();
+
+  return (req: BunRequest) => {
+    const key = `${events.generation} ${req.url}`;
+    const next = running.get(key) ?? build(req).finally(() => running.delete(key));
+
+    running.set(key, next);
+
+    return next;
+  };
+}
+
+const liveAgents = cached(() => agents(config), 5_000);
+
+events.pushAgents(liveAgents.fresh);
 
 const json =
   <T>(handler: (req: BunRequest) => Promise<T> | T) =>
@@ -119,8 +153,8 @@ const server = Bun.serve({
         return repos.discard(ws.id);
       }),
     },
-    "/api/ws/:ws/files": json((req) => repos.files(param(req, "ws"))),
-    "/api/ws/:ws/changes": json((req) => repos.changes(param(req, "ws"))),
+    "/api/ws/:ws/files": json(sharing((req) => repos.files(param(req, "ws")))),
+    "/api/ws/:ws/changes": json(sharing((req) => repos.changes(param(req, "ws")))),
     "/api/ws/:ws/file": {
       GET: json((req) => repos.read(param(req, "ws"), query(req, "path"))),
       PUT: json(async (req) => repos.write(param(req, "ws"), query(req, "path"), await req.text())),
@@ -135,7 +169,7 @@ const server = Bun.serve({
 
       return { contents: await Bun.file(join(config.drafts.dir, name)).text() };
     }),
-    "/api/agents": json(() => agents(config)),
+    "/api/agents": json(liveAgents.get),
     "/api/plugins": json(() => plugins(config)),
     "/api/plugins/:id": { POST: json(async (req) => setPlugin(config, param(req, "id"), (await req.json()).enabled === true)) },
     "/api/executor": json(() => needExecutor().overview()),

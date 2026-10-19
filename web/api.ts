@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
 import type { DeckEvent } from "../src/events";
+import type { Agents } from "../src/types";
 
 export class ApiError extends Error {}
 
@@ -68,7 +69,11 @@ async function fetchLoaded<T>(path: string): Promise<Loaded<T>> {
   }
 }
 
-export function useLoad<T>(path: string | null, refreshOn?: (event: DeckEvent) => boolean): Load<T> {
+export function useLoad<T>(
+  path: string | null,
+  refreshOn?: (event: DeckEvent) => boolean,
+  pushed?: (event: DeckEvent) => T | undefined,
+): Load<T> {
   const [state, setState] = useState<Loaded<T>>({ path, data: null, error: null });
   const latest = useRef(path);
 
@@ -86,7 +91,11 @@ export function useLoad<T>(path: string | null, refreshOn?: (event: DeckEvent) =
   }, [path, reload]);
 
   useDeckEvent((event) => {
-    if (event.type === "resync" || refreshOn?.(event)) void reload();
+    if (event.type !== "resync" && !refreshOn?.(event)) return;
+    const data = event.type === "resync" ? undefined : pushed?.(event);
+
+    if (data) setState({ path, data, error: null });
+    else void reload();
   });
 
   useEffect(() => {
@@ -101,6 +110,13 @@ export function useLoad<T>(path: string | null, refreshOn?: (event: DeckEvent) =
 
   return { data: current ? state.data : null, error: current ? state.error : null, reload };
 }
+
+export const useAgents = () =>
+  useLoad<Agents>(
+    "/agents",
+    (e) => e.type === "agents",
+    (e) => (e.type === "agents" ? e.data : undefined),
+  );
 
 const routeListeners = new Set<() => void>();
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { Agents as AgentsData, AppThreads, PoolAccount, Thread } from "../../src/types";
-import { relativeTime, useLoad } from "../api";
+import type { AppThreads, PoolAccount, Thread } from "../../src/types";
+import { relativeTime, useAgents } from "../api";
 import { Empty, Meter } from "../ui";
 
 export const APP_LABEL = new Map([
@@ -21,7 +21,7 @@ export const accountHue = (accounts: PoolAccount[], label: string | null) => {
 };
 
 export function Agents() {
-  const agents = useLoad<AgentsData>("/agents", (e) => e.type === "agents");
+  const agents = useAgents();
 
   if (agents.error) return <Empty>{agents.error}</Empty>;
 

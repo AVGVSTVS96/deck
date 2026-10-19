@@ -1,6 +1,11 @@
 import { existsSync, watch, type FSWatcher } from "node:fs";
+import type { Agents } from "./types";
 
-export type DeckEvent = { type: "repo"; repo: string } | { type: "ws"; id: string } | { type: "agents" } | { type: "plugins" };
+export type DeckEvent =
+  | { type: "repo"; repo: string }
+  | { type: "ws"; id: string }
+  | { type: "agents"; data?: Agents }
+  | { type: "plugins" };
 
 const encoder = new TextEncoder();
 const BURST_MS = 80;
@@ -9,16 +14,25 @@ export class Events {
   private clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
   private queued = new Set<string>();
   private watchers = new Map<string, FSWatcher>();
+  private agents: (() => Promise<Agents>) | null = null;
+  generation = 0;
+
+  pushAgents(build: () => Promise<Agents>) {
+    this.agents = build;
+  }
 
   emit(event: DeckEvent) {
     const key = JSON.stringify(event);
 
     if (this.queued.has(key)) return;
     this.queued.add(key);
-    setTimeout(() => {
+    setTimeout(async () => {
       this.queued.delete(key);
+      this.generation++;
+      const data = event.type === "agents" && this.agents && this.clients.size ? await this.agents().catch(() => undefined) : undefined;
+      const message = encoder.encode(`data: ${data ? JSON.stringify({ ...event, data }) : key}\n\n`);
 
-      for (const client of this.clients) client.enqueue(encoder.encode(`data: ${key}\n\n`));
+      for (const client of this.clients) client.enqueue(message);
     }, BURST_MS);
   }
 

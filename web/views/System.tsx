@@ -1,5 +1,5 @@
-import type { Agents, Changes, ExecutorOverview, Plugin, RepoSummary, Window, Workspace } from "../../src/types";
-import { relativeTime, useLoad } from "../api";
+import type { Changes, ExecutorOverview, Plugin, RepoSummary, Window, Workspace } from "../../src/types";
+import { relativeTime, useAgents, useLoad } from "../api";
 import { Empty, Link } from "../ui";
 import { APP_LABEL } from "./Agents";
 
@@ -7,7 +7,7 @@ const DOT_CAP = 40;
 
 export function System() {
   const repos = useLoad<RepoSummary[]>("/repos", (e) => e.type === "repo" || e.type === "ws");
-  const agents = useLoad<Agents>("/agents", (e) => e.type === "agents");
+  const agents = useAgents();
   const plugins = useLoad<Plugin[]>("/plugins", (e) => e.type === "plugins");
   const executor = useLoad<ExecutorOverview>("/executor");
   const worktrees = repos.data?.flatMap((r) => r.workspaces.filter((w) => w.name)) ?? [];

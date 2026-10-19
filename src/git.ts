@@ -20,22 +20,33 @@ async function run(command: string, cwd: string, args: string[]) {
   return out;
 }
 
-export const git = (cwd: string, args: string[]) => run("git", cwd, args);
+export const git = (cwd: string, args: string[]) => run("git", cwd, ["--no-optional-locks", ...args]);
 const gh = (cwd: string, args: string[]) => run("gh", cwd, args);
 
 const attempt = (cwd: string, args: string[]) => git(cwd, args).catch(() => null);
 const split = (out: string) => out.split("\0").filter(Boolean);
 const untrackedFiles = (out: string) => split(out).filter((path) => !path.endsWith("/"));
 
+const lineCounts = new Map<string, { stamp: string; lines: number }>();
+
 async function lineCount(path: string) {
   const file = Bun.file(path);
+  const stats = await file.stat().catch(() => null);
 
-  if (file.size > MAX_BYTES) return 0;
+  if (!stats || stats.size > MAX_BYTES) return 0;
+  const stamp = `${stats.size} ${stats.mtimeMs}`;
+  const known = lineCounts.get(path);
 
-  return file
+  if (known?.stamp === stamp) return known.lines;
+
+  const lines = await file
     .text()
     .then((text) => text.split("\n").length)
     .catch(() => 0);
+
+  lineCounts.set(path, { stamp, lines });
+
+  return lines;
 }
 
 export const slug = (name: string) =>
