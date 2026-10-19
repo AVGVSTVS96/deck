@@ -425,8 +425,13 @@ function ChangesPanel({ ws, repo, file }: { ws: Workspace; repo: RepoSummary; fi
 
   const ship = () =>
     run("ship", async () => {
-      const result = await send<{ branch: string; commits: number; head: string }>(`/ws/${encodeURIComponent(ws.id)}/ship`, "POST");
-      toast(`Shipped ${result.commits} commit${result.commits === 1 ? "" : "s"} to ${result.branch} (${result.head})`);
+      const result = await send<{ branch: string; commits: number; head?: string; pr?: string }>(
+        `/ws/${encodeURIComponent(ws.id)}/ship`,
+        "POST",
+      );
+
+      const commits = `${result.commits} commit${result.commits === 1 ? "" : "s"}`;
+      toast(result.pr ? `Pull request for ${commits}: ${result.pr}` : `Shipped ${commits} to ${result.branch} (${result.head})`);
       await changes.reload();
     });
 
@@ -508,14 +513,14 @@ function ChangesPanel({ ws, repo, file }: { ws: Workspace; repo: RepoSummary; fi
             Commit, signed
           </Busy>
           <Busy on={busy === "ship"} disabled={!c || c.dirty || c.ahead === 0} onClick={ship} title={c?.dirty ? "Commit first" : undefined}>
-            Ship {c?.ahead || ""} to {ws.base}
+            {repo.review ? `Open PR into ${ws.base}` : `Ship ${c?.ahead || ""} to ${ws.base}`}
           </Busy>
           <Busy on={busy === "discard"} className="quiet" onClick={discard}>
             Remove worktree
           </Busy>
         </div>
       )}
-      {(repo.unpushed ?? 0) > 0 && (
+      {!repo.review && (repo.unpushed ?? 0) > 0 && (
         <div className="push">
           <p className="muted">
             {repo.branch} is {repo.unpushed} commit{repo.unpushed === 1 ? "" : "s"} ahead of its remote.

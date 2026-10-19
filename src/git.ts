@@ -10,15 +10,18 @@ const PREFIX = "deck/";
 
 export class GitError extends Error {}
 
-export async function git(cwd: string, args: string[]) {
-  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+async function run(command: string, cwd: string, args: string[]) {
+  const proc = Bun.spawn([command, ...args], { cwd, stdout: "pipe", stderr: "pipe" });
 
   const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
 
-  if (code !== 0) throw new GitError(err.trim() || out.trim() || `git ${args[0]} failed`);
+  if (code !== 0) throw new GitError(err.trim() || out.trim() || `${command} ${args[0]} failed`);
 
   return out;
 }
+
+export const git = (cwd: string, args: string[]) => run("git", cwd, args);
+const gh = (cwd: string, args: string[]) => run("gh", cwd, args);
 
 const attempt = (cwd: string, args: string[]) => git(cwd, args).catch(() => null);
 const split = (out: string) => out.split("\0").filter(Boolean);
@@ -108,6 +111,7 @@ export class Git {
       name: repo.name,
       about: repo.about,
       path: repo.path,
+      review: repo.review,
       branch: workspaces[0].branch,
       unpushed: unpushed === null ? null : Number(unpushed),
       workspaces,
@@ -283,6 +287,8 @@ export class Git {
     if (changes.dirty) throw new GitError("Commit your edits before shipping.");
 
     if (changes.ahead === 0) throw new GitError("Nothing to ship yet.");
+
+    if (repo.review) return this.propose(ws);
     const live = await liveBranch(repo);
 
     if (!live || live !== ws.base)
@@ -295,17 +301,36 @@ export class Git {
       });
     }
 
-    const commits = split((await git(ws.path, ["rev-list", "-z", `${live}..HEAD`])).replaceAll("\n", "\0"));
-    const unsigned = (await Promise.all(commits.map(async (sha) => ((await this.signed(ws.path, sha)) ? null : sha)))).filter(Boolean);
-
-    if (unsigned.length) throw new GitError(`Unsigned commits, not shipped: ${unsigned.join(", ")}`);
+    const commits = await this.signedCommits(ws.path, live);
     await git(repo.path, ["merge", "--ff-only", ws.branch ?? ""]);
 
     return { branch: live, commits: commits.length, head: (await git(repo.path, ["rev-parse", "--short", "HEAD"])).trim() };
   }
 
+  private async signedCommits(cwd: string, base: string) {
+    const commits = split((await git(cwd, ["rev-list", "-z", `${base}..HEAD`])).replaceAll("\n", "\0"));
+    const unsigned = (await Promise.all(commits.map(async (sha) => ((await this.signed(cwd, sha)) ? null : sha)))).filter(Boolean);
+
+    if (unsigned.length) throw new GitError(`Unsigned commits, not shipped: ${unsigned.join(", ")}`);
+
+    return commits;
+  }
+
+  private async propose(ws: Workspace) {
+    const branch = ws.branch ?? "";
+    const commits = await this.signedCommits(ws.path, ws.base ?? "");
+
+    await git(ws.path, ["push", "origin", `HEAD:refs/heads/${branch}`]);
+    const open = await gh(ws.path, ["pr", "list", "--head", branch, "--json", "url", "--jq", ".[0].url"]);
+    const pr = open.trim() || (await gh(ws.path, ["pr", "create", "--base", ws.base ?? "", "--head", branch, "--fill"])).trim();
+
+    return { branch: ws.base, commits: commits.length, pr };
+  }
+
   async push(repoId: string) {
     const repo = this.repo(repoId);
+
+    if (repo.review) throw new GitError(`${repo.name} changes go through pull requests. Ship a worktree instead.`);
     await git(repo.path, ["push"]);
 
     return { pushed: true };

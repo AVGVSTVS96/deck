@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-export type Repo = { id: string; name: string; path: string; about: string };
+export type Repo = { id: string; name: string; path: string; about: string; review: boolean };
 
 export type Config = {
   host: string;
@@ -32,8 +32,8 @@ async function readFileConfig(): Promise<FileConfig> {
 
 function defaultRepos(hex: string): Repo[] {
   return [
-    { id: "hex", name: "hex", path: hex, about: "Your files: rules, soul, schedules, memory" },
-    { id: "core", name: "hex core", path: join(hex, ".hex"), about: "hex itself, shared by every hex user" },
+    { id: "hex", name: "hex", path: hex, about: "Your files: rules, soul, schedules, memory", review: false },
+    { id: "core", name: "hex core", path: join(hex, ".hex"), about: "hex itself, shared by every hex user", review: true },
   ];
 }
 
@@ -46,6 +46,7 @@ export async function loadConfig(): Promise<Config> {
     name: repo.name ?? repo.id ?? "",
     path: expand(repo.path ?? ""),
     about: repo.about ?? "",
+    review: repo.review === true,
   }));
 
   return {

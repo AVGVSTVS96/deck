@@ -14,6 +14,7 @@ export type RepoSummary = {
   name: string;
   about: string;
   path: string;
+  review: boolean;
   branch: string | null;
   unpushed: number | null;
   workspaces: Workspace[];

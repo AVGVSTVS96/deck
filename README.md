@@ -7,7 +7,7 @@ A control room for [hex](https://github.com/AVGVSTVS96/hex) agents. Browse and e
  (worktrees)     (your repos)            (hex threads)        (token pool)
 ```
 
-- **Files**: every configured repo as a file tree, rendered with [`@pierre/trees`](https://www.npmjs.com/package/@pierre/trees) and [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs). The live checkout is read-only. Pressing Edit opens a git worktree on a `deck/<name>` branch, so running sessions keep reading the live files while you work. Edits save as you type. From the side panel you commit (always signed, refused otherwise), ship (rebase onto the live branch if it moved, then fast-forward), push, or remove the worktree.
+- **Files**: every configured repo as a file tree, rendered with [`@pierre/trees`](https://www.npmjs.com/package/@pierre/trees) and [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs). The live checkout is read-only. Pressing Edit opens a git worktree on a `deck/<name>` branch, so running sessions keep reading the live files while you work. Edits save as you type. From the side panel you commit (always signed, refused otherwise), ship (rebase onto the live branch if it moved, then fast-forward), push, or remove the worktree. In a repo marked `review`, like hex core, Ship instead pushes the worktree's branch and opens a pull request into the live branch (or returns the one already open), and the live branch is never pushed directly.
 - **Drafts**: a folder of proposed files, each shown as a diff against the live file it would replace, with one button to take it into a worktree.
 - **Agents**: every hex thread across Telegram, Discord, Buzz and T3 Code, which ones are running right now, and the pooled account each one is bound to, with 5-hour and weekly usage against the pool's switch-over thresholds.
 - **Plugins**: hex channels, hex mods, and Claude Code plugins, with a switch that turns a Claude Code plugin on or off for new sessions.
@@ -36,7 +36,7 @@ deck reads `~/.config/deck/config.json` (or the path in `DECK_CONFIG`). Every fi
   "hex": "~/hex",
   "repos": [
     { "id": "hex", "name": "hex", "path": "~/hex", "about": "Your files: rules, soul, schedules, memory" },
-    { "id": "core", "name": "hex core", "path": "~/hex/.hex", "about": "hex itself, shared by every hex user" }
+    { "id": "core", "name": "hex core", "path": "~/hex/.hex", "about": "hex itself, shared by every hex user", "review": true }
   ],
   "worktrees": "~/.local/share/deck/worktrees",
   "drafts": { "dir": "~/drafts", "targets": { "AGENTS.md": "hex:AGENTS.md" } },
@@ -45,14 +45,15 @@ deck reads `~/.config/deck/config.json` (or the path in `DECK_CONFIG`). Every fi
 }
 ```
 
-| Field            | What it is                                                                  |
-| ---------------- | --------------------------------------------------------------------------- |
-| `repos`          | Git repos to browse and edit. `id` appears in URLs.                         |
-| `worktrees`      | Where deck keeps its worktrees, one folder per repo.                        |
-| `drafts.targets` | Maps a draft's file name to `repo:path` of the live file it replaces.       |
-| `tokenhub`       | A tokenhub server, for the account pool.                                    |
-| `executor.apps`  | A folder with one subfolder per Executor app slug holding its local source. |
-| `executor.token` | A file holding an Executor API token.                                       |
+| Field            | What it is                                                                      |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `repos`          | Git repos to browse and edit. `id` appears in URLs.                             |
+| `repos[].review` | Ship opens a pull request (via `gh`) instead of merging into the live checkout. |
+| `worktrees`      | Where deck keeps its worktrees, one folder per repo.                            |
+| `drafts.targets` | Maps a draft's file name to `repo:path` of the live file it replaces.           |
+| `tokenhub`       | A tokenhub server, for the account pool.                                        |
+| `executor.apps`  | A folder with one subfolder per Executor app slug holding its local source.     |
+| `executor.token` | A file holding an Executor API token.                                           |
 
 `HOST`, `PORT`, `HEX_HOME` and `CLAUDE_CONFIG_DIR` override the matching settings.
 
