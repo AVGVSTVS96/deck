@@ -11,6 +11,7 @@ export const APP_LABEL = new Map([
   ["voice", "Voice"],
   ["imessage", "iMessage"],
   ["other", "Other Claude sessions"],
+  ["mac", "Mac"],
 ]);
 
 export const accountHue = (accounts: PoolAccount[], label: string | null) => {
@@ -142,7 +143,7 @@ function ThreadRow({ thread, hue }: { thread: Thread; hue: number | null }) {
     <li className={thread.running ? "thread on" : "thread"}>
       <span className={thread.running ? "dot live" : "dot off"} title={thread.running ? "Running" : "Idle"} />
       <span className="tname">{thread.name}</span>
-      {thread.cwd && <span className="cwd">{thread.cwd.replace(/^\/home\/[^/]+/, "~")}</span>}
+      {thread.cwd && <span className="cwd">{thread.cwd.replace(/^\/(home|Users)\/[^/]+/, "~")}</span>}
       <span className="spacer" />
       {thread.account && (
         <span className="acct" data-hue={hue ?? undefined} title={`Bound to ${thread.account}`}>

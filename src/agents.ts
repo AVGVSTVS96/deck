@@ -20,7 +20,9 @@ type RoutingAccount = {
   week: PoolWindow;
 };
 
-type Routing = { at: string; selectedAccountId: string; accounts: RoutingAccount[] };
+type Binding = { sessionId: string; accountId: string; host?: string; name?: string | null; cwd?: string | null };
+
+type Routing = { at: string; selectedAccountId: string; accounts: RoutingAccount[]; bindings?: Binding[] };
 
 type PoolStatus = { bindings: Record<string, string> };
 
@@ -104,6 +106,25 @@ export async function agents(config: Config): Promise<Agents> {
         cwd: s.cwd,
         running: true,
         account: status?.bindings[s.sessionId] ?? null,
+        link: null,
+      })),
+    });
+  }
+
+  const labels = new Map(routing?.accounts.map((account) => [account.id, account.label]));
+  const elsewhere = (routing?.bindings ?? []).filter((b) => b.host && b.host !== "server");
+
+  for (const [host, bindings] of Map.groupBy(elsewhere, (b) => b.host!)) {
+    apps.push({
+      app: host,
+      connected: true,
+      threads: bindings.map((b) => ({
+        id: b.sessionId,
+        name: b.name ?? "Claude session",
+        session: b.sessionId,
+        cwd: b.cwd ?? null,
+        running: true,
+        account: labels.get(b.accountId) ?? null,
         link: null,
       })),
     });
