@@ -424,8 +424,12 @@ function Summary({ totals, previous }: { totals: Totals; previous: Totals | null
 
 type MeasureDef = (typeof MEASURES)[number];
 
+const shortAccount = (label: string) => label.split("@")[0];
+
 function Ranking({ view, measure, selected, all }: { view: UsageView; measure: MeasureDef; selected: string | null; all: boolean }) {
   const [key, , value] = measure;
+  const accounts = useLiveList("a:");
+  const accountLabel = (id: string) => (id ? (accounts.find(([k]) => k === id)?.[1].label ?? id) : "none");
   const max = Math.max(...view.rows.map(value), 0) || 1;
 
   const sorted: [Measure, string, string][] = [
@@ -454,6 +458,7 @@ function Ranking({ view, measure, selected, all }: { view: UsageView; measure: M
             <th className="n idx">#</th>
             <th>Name</th>
             <th className="share">Share · activity</th>
+            <th className="accts">Accounts</th>
             {sorted.map(([k, label]) => (
               <th key={k} className="n" aria-sort={k === key ? "descending" : undefined}>
                 <button onClick={() => setParams({ measure: k })}>
@@ -494,6 +499,7 @@ function Ranking({ view, measure, selected, all }: { view: UsageView; measure: M
                 </span>
                 <Spark values={r.series} color={r.color} />
               </td>
+              <td className="accts muted small">{r.byAccount.map((a) => shortAccount(accountLabel(a.account))).join(" · ") || "–"}</td>
               <td className="n" data-label="Tokens">
                 {fmt.tokens(r.amount.tokens)}
               </td>
@@ -562,6 +568,7 @@ function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow |
   const accounts = useLiveList("a:").map(([, a]) => a);
   const name = (id: string) => (id ? (accounts.find((a) => a.id === id)?.label ?? id) : "No account");
   const drills = state.by === "agent" && row !== null && row.sessions > 1;
+
   const sessions = useApi<UsageView>(
     drills ? usagePath({ ...state, by: "session", q: "" }, { within: row.key, limit: "12" }) : null,
     "usage",
@@ -712,6 +719,7 @@ const csvCell = (v: string | number | null) => {
 async function exportCsv(state: State, view: UsageView) {
   try {
     const all = await api<UsageView>(usagePath(state, { limit: String(Math.max(view.rowCount, 1)) }));
+
     const head = [
       "key",
       "label",

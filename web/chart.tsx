@@ -187,7 +187,7 @@ export function Spark({ values, color, width = 96, height = 20 }: { values: numb
   const band = width / Math.max(values.length, 1);
 
   return (
-    <svg className="spark" width={width} height={height} data-c={color} aria-hidden>
+    <svg className="spark" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" data-c={color} aria-hidden>
       <path
         d={values
           .map((v, i) => (v > 0 ? `M${i * band},${height}v${-Math.max(1, (v / max) * height)}h${Math.max(1, band - 1)}V${height}z` : ""))

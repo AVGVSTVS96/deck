@@ -1566,3 +1566,27 @@ button.primary:disabled {
   border-color: var(--rule);
   box-shadow: none;
 }
+
+.spark {
+  width: 96px;
+  height: 20px;
+}
+
+.rank .accts {
+  display: none;
+}
+
+@media (min-width: 1800px) {
+  .rank .accts {
+    display: table-cell;
+    max-width: 22ch;
+  }
+
+  .rank .spark {
+    width: 180px;
+  }
+
+  .rank .bar {
+    width: 140px;
+  }
+}
