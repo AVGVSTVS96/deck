@@ -1037,7 +1037,12 @@ td.share > * {
 
 .detail .pad {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+}
+
+.by-account td:first-child {
+  overflow-wrap: anywhere;
 }
 
 .figures {
@@ -1600,6 +1605,12 @@ button.primary:disabled {
 
 @media (min-width: 720px) {
   .sort {
+    display: none;
+  }
+}
+
+@media (max-width: 719px) {
+  .by-account .share {
     display: none;
   }
 }
