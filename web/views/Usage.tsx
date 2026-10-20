@@ -119,7 +119,12 @@ export default function Usage() {
   const onPage = view?.rows.find((r) => r.key === selected) ?? null;
   const offPage = useApi<UsageView>(selected && view && !onPage ? usagePath(state, { within: selected, limit: "1" }) : null, "usage");
 
-  if (!view) return usage.error ? <Empty>{usage.error}</Empty> : <Empty>Reading usage…</Empty>;
+  if (!view)
+    return usage.error ? (
+      <Empty>{usage.error}</Empty>
+    ) : (
+      <Empty>Reading usage… The first read of a range takes token-tracker a few seconds.</Empty>
+    );
 
   const chosen = onPage ?? offPage.data?.rows.find((r) => r.key === selected) ?? null;
 
@@ -431,7 +436,7 @@ const shortAccount = (label: string) => label.split("@")[0];
 function Ranking({ view, measure, selected, all }: { view: UsageView; measure: MeasureDef; selected: string | null; all: boolean }) {
   const [key, , value] = measure;
   const accounts = useLiveList("a:");
-  const accountLabel = (id: string) => (id ? (accounts.find(([k]) => k === id)?.[1].label ?? id) : "none");
+  const accountLabel = (id: string) => (id && id !== "none" ? (accounts.find(([k]) => k === id)?.[1].label ?? id) : "none");
   const max = Math.max(...view.rows.map(value), 0) || 1;
 
   const sorted: [Measure, string, string][] = [
@@ -568,7 +573,7 @@ function Limits() {
 
 function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow | null; picked: boolean; state: State }) {
   const accounts = useLiveList("a:").map(([, a]) => a);
-  const name = (id: string) => (id ? (accounts.find((a) => a.id === id)?.label ?? id) : "No account");
+  const name = (id: string) => (id && id !== "none" ? (accounts.find((a) => a.id === id)?.label ?? id) : "No account");
   const drills = state.by === "agent" && row !== null && row.sessions > 1;
 
   const sessions = useApi<UsageView>(
@@ -658,7 +663,7 @@ function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow |
                   </li>
                 ))}
                 {sessions.data.rowCount > sessions.data.rows.length && (
-                  <li className="muted small">
+                  <li className="more muted small">
                     and {sessions.data.rowCount - sessions.data.rows.length} more ·{" "}
                     <Link to={`/?${new URLSearchParams({ range: state.range, by: "session", measure: state.measure, q: row.label })}`}>
                       see all
