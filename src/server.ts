@@ -89,7 +89,7 @@ function sharing<T>(build: (req: BunRequest) => Promise<T>) {
 
 const liveAgents = cached(() => agents(config), 5_000);
 
-events.pushAgents(liveAgents.fresh);
+events.pushAgents(liveAgents.get);
 
 const json =
   <T>(handler: (req: BunRequest) => Promise<T> | T) =>
