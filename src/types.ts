@@ -81,7 +81,7 @@ export type MoveCause = "limit" | "over" | "early" | "restart";
 
 export type Move = { at: string; session: string; name: string | null; from: string; to: string; cause: MoveCause };
 
-export type Start = { at: string; account: string };
+export type Start = { at: string; session: string; account: string };
 
 export type Host = { host: string; seenAt: number | null; seats: number };
 

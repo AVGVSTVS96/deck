@@ -123,7 +123,7 @@ async function history(since: number) {
 
       if (Date.parse(row.at) < since || before?.accountId === row.accountId) return;
 
-      if (!before) starts.push({ at: row.at, account: row.accountId! });
+      if (!before) starts.push({ at: row.at, session, account: row.accountId! });
       else
         moves.push({
           at: row.at,
@@ -336,7 +336,7 @@ export async function agents(config: Config): Promise<Agents> {
         to: label(to),
         cause,
       })),
-      starts: (logged?.starts ?? []).map(({ at, account }) => ({ at, account: label(account) })),
+      starts: (logged?.starts ?? []).map(({ at, session, account }) => ({ at, session, account: label(account) })),
       hosts: await hosts(bindings),
     },
     tokenhub: config.tokenhub,
@@ -355,13 +355,15 @@ export async function agentUsage(config: Config, range: string): Promise<AgentUs
 
   return {
     at: status.generatedAt,
-    surfaces: status.surfaces.map((s) => ({
-      name: s.name,
-      tokens: s.tokens,
-      api: s.costUSD,
-      plan: s.subscriptionUSD ?? s.costUSD,
-      sessions: s.sessions,
-    })),
+    surfaces: status.surfaces
+      .toSorted((a, b) => b.tokens - a.tokens)
+      .map((s) => ({
+        name: s.name,
+        tokens: s.tokens,
+        api: s.costUSD,
+        plan: s.subscriptionUSD ?? s.costUSD,
+        sessions: s.sessions,
+      })),
     blocked: status.jobs
       .filter((j) => j.state === "blocked")
       .map((j) => ({ id: j.id, name: j.name, surface: j.surface, since: j.updatedAt ?? status.generatedAt })),
