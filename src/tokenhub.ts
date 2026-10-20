@@ -47,7 +47,7 @@ const SAME_MOVE_MS = 300_000;
 function windowOf(wire: WireWindow, length: number, fallbackCutoff: number): LimitWindow {
   if (!wire) return { used: null, cutoff: fallbackCutoff, resetsAt: null, sampledAt: null, elapsed: null };
   const { usedPercentage, resetsAt, sampledAt, effectiveThreshold } = wire;
-  const elapsed = resetsAt && sampledAt ? Math.min(1, Math.max(0, 1 - (resetsAt - sampledAt) / length)) : null;
+  const elapsed = resetsAt && sampledAt ? Math.round(Math.min(1, Math.max(0, 1 - (resetsAt - sampledAt) / length)) * 1000) / 1000 : null;
 
   return { used: usedPercentage, cutoff: effectiveThreshold, resetsAt, sampledAt, elapsed };
 }
@@ -264,7 +264,7 @@ export function tokenhub(settings: Settings) {
   const logs = source({
     load: () => history(state),
     watch: [{ path: state, only: /^(usage-history|attribution|recovery)\.ndjson$/ }, { path: join(state, "remote") }],
-    debounceMs: 1_000,
+    debounceMs: 30_000,
   });
 
   async function policy(proposed: Policy, revision: string, save: boolean): Promise<PolicyResult> {
