@@ -398,6 +398,14 @@ function PoolSettings({
   const valid = FIELDS.every((f) => Number.isInteger(values[f.key]) && values[f.key] >= 1 && values[f.key] <= f.max);
   const previewed = preview !== null && FIELDS.every((f) => preview.settings[f.key] === values[f.key]);
 
+  const hint = !dirty
+    ? "Change a value to preview it."
+    : !valid
+      ? "Cutoffs go from 1 to 100%, agents from 1 to 500."
+      : previewed
+        ? "This is what saving would change right now:"
+        : "Preview to see what changes, then save.";
+
   const change = (key: keyof Settings, value: number) => {
     setPreview(null);
     setDraft({ ...values, [key]: value });
@@ -469,13 +477,7 @@ function PoolSettings({
         >
           Discard
         </button>
-        <span className="muted small">
-          {dirty
-            ? previewed
-              ? "This is what saving would change right now:"
-              : "Preview to see what changes, then save."
-            : "Change a value to preview it."}
-        </span>
+        <span className="muted small">{hint}</span>
       </div>
       {previewed && <Changes now={pool.accounts} then={preview.accounts} />}
     </section>
