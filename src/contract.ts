@@ -98,6 +98,7 @@ export type Account = {
   id: string;
   label: string;
   plan: string;
+  /** When the account's current plan started, from tokenhub's plan record; not when it joined the pool. */
   since: number | null;
   signInUntil: number | null;
   rank: number | null;

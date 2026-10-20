@@ -34,7 +34,7 @@ export type Source<T> = {
   readonly value: T | undefined;
   readonly at: number;
   readonly error: string | null;
-  /** Fires only when a load returns a value that differs from the last one. */
+  /** Fires only when a load's news differs from the last one's. */
   on(change: (value: T) => void): void;
   /** One load in flight; a call during a load queues exactly one more. */
   refresh(): Promise<void>;
@@ -49,9 +49,19 @@ type Options<T> = {
   debounceMs?: number;
   everyMs?: number;
   active?: () => boolean;
+  /** Text that changes only when the value has news for listeners; the whole value by default. */
+  news?: (value: T) => string;
 };
 
-export function source<T>({ name, load, watch: paths = [], debounceMs, everyMs, active = () => true }: Options<T>): Source<T> {
+export function source<T>({
+  name,
+  load,
+  watch: paths = [],
+  debounceMs,
+  everyMs,
+  active = () => true,
+  news = (value) => JSON.stringify(value),
+}: Options<T>): Source<T> {
   const listeners = new Set<(value: T) => void>();
   let running: Promise<void> | null = null;
   let again = false;
@@ -72,14 +82,14 @@ export function source<T>({ name, load, watch: paths = [], debounceMs, everyMs, 
 
       try {
         const next = await load();
-        const nextText = JSON.stringify(next);
+        const nextText = news(next);
 
+        self.value = next;
         self.at = Date.now();
         self.error = null;
 
         if (nextText === text) continue;
         text = nextText;
-        self.value = next;
 
         for (const change of listeners) change(next);
       } catch (error) {

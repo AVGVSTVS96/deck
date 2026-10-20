@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { LiveSession, LiveState, LiveValue, Who } from "./contract";
 import { labelOf, projectOf, rowOf, whoOf, type Names } from "./identity";
@@ -9,7 +9,7 @@ import type { Tracked } from "./tracker";
 
 type Running = { sessionId: string; cwd: string; name: string | null; busy: boolean; startedAt: number };
 
-type Blocked = { sessionId: string; name: string | null; since: number };
+type Blocked = { sessionId: string; name: string | null; cwd: string; since: number };
 
 export type Processes = { running: Running[]; blocked: Blocked[]; apps: Record<string, boolean> };
 
@@ -43,12 +43,11 @@ async function read(claude: string, hex: string): Promise<Processes> {
   const blocked = (
     await Promise.all(
       jobs.map(async (id) => {
-        const path = join(jobsDir, id, "state.json");
-        const job = await json(path);
+        const job = await json(join(jobsDir, id, "state.json"));
 
         if (job?.state !== "blocked" || !job.sessionId) return null;
 
-        return { sessionId: job.sessionId, name: job.name ?? null, since: (await stat(path)).mtimeMs };
+        return { sessionId: job.sessionId, name: job.name ?? null, cwd: job.cwd ?? "", since: Date.parse(job.updatedAt) || 0 };
       }),
     )
   ).filter((job) => job !== null);
@@ -82,6 +81,9 @@ type Inputs = { processes: Processes | undefined; pool: PoolState | undefined; n
  */
 export type Live = { sessions: Map<string, LiveSession>; map: Record<string, LiveValue> };
 
+/** When deck first saw each session, for those with no start time of their own, such as the Mac's seats. */
+const firstSeen = new Map<string, number>();
+
 export function liveMap({ processes: found, pool, names, tracked }: Inputs): Live {
   const sessions = new Map<string, LiveSession>();
   const seats = new Map(pool?.seats.map((seat) => [seat.session, seat]));
@@ -92,6 +94,9 @@ export function liveMap({ processes: found, pool, names, tracked }: Inputs): Liv
   /** The row is the one Usage ranks this session under; the label may use the process's own name, such as a bin/job `<owner>/<unit>`. */
   const session = (id: string, name: string | null, cwd: string, state: LiveState, since: number, host: string): LiveSession => {
     const record = known.get(id);
+    const seen = firstSeen.get(id) ?? Date.now();
+
+    firstSeen.set(id, seen);
     const project = record ? projectOf(record) : (projects.get(cwd) ?? cwd);
 
     const who = (title: string | null): Who => (names ? whoOf(names, { sessionId: id, title, project }) : { kind: "project", project });
@@ -107,8 +112,8 @@ export function liveMap({ processes: found, pool, names, tracked }: Inputs): Liv
       state,
       account: seats.get(id)?.account ?? null,
       host,
-      cwd,
-      since,
+      cwd: cwd || record?.cwd || "",
+      since: since || record?.firstAt || seen,
     };
   };
 
@@ -119,13 +124,16 @@ export function liveMap({ processes: found, pool, names, tracked }: Inputs): Liv
   }
 
   for (const job of found?.blocked ?? []) {
-    if (!sessions.has(job.sessionId)) sessions.set(job.sessionId, session(job.sessionId, job.name, "", "blocked", job.since, "server"));
+    if (!sessions.has(job.sessionId))
+      sessions.set(job.sessionId, session(job.sessionId, job.name, job.cwd, "blocked", job.since, "server"));
   }
 
   for (const seat of pool?.seats ?? []) {
     if (seat.host === "server" || !/^[0-9a-f-]{36}$/.test(seat.session)) continue;
     sessions.set(seat.session, session(seat.session, seat.name, seat.cwd ?? "", seat.waiting ? "idle" : "working", 0, seat.host));
   }
+
+  for (const id of firstSeen.keys()) if (!sessions.has(id)) firstSeen.delete(id);
 
   const map: Live["map"] = Object.fromEntries([...sessions].map(([id, s]) => [`s:${id}`, s]));
 

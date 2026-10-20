@@ -53,8 +53,8 @@ function windowOf(wire: WireWindow, length: number, fallbackCutoff: number): Lim
 }
 
 const PLANS: [RegExp, string][] = [
-  [/max_20x/, "Max 20x"],
-  [/max_5x/, "Max 5x"],
+  [/max.?20x/, "Max 20x"],
+  [/max.?5x/, "Max 5x"],
   [/max/, "Max"],
   [/pro/, "Pro"],
 ];
