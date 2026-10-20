@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Bucket, Dimension, GroupBy, LiveState, Measure, Range, Totals, UsageRow, UsageView } from "../../src/contract";
-import { api, setParams, useApi, useLive, useLiveList, useSearch } from "../api";
+import { LIVE_ORDER, api, setParams, useAccounts, useApi, useLiveList, useSearch } from "../api";
 import { Columns, Spark } from "../chart";
 import { Empty, Link, Meter, STANDING, Seg, fail, fmt, useNow, when } from "../ui";
 
@@ -24,12 +24,12 @@ const GROUPS = [
 const usdAxis = (n: number) => `$${fmt.axis(n)}`;
 
 const MEASURES = [
-  ["tokens", "Tokens", (r: UsageRow) => r.amount.tokens, fmt.tokens, fmt.axis],
-  ["api", "API value", (r: UsageRow) => r.amount.apiUsd, fmt.usd, usdAxis],
-  ["plan", "Plan cost", (r: UsageRow) => r.amount.planUsd, fmt.usd, usdAxis],
-  ["fiveHour", "5h points", (r: UsageRow) => r.points.fiveHour ?? 0, fmt.pts, fmt.pts],
-  ["week", "Week points", (r: UsageRow) => r.points.week ?? 0, fmt.pts, fmt.pts],
-] as const satisfies readonly (readonly [Measure, string, (r: UsageRow) => number, (n: number) => string, (n: number) => string])[];
+  ["tokens", "Tokens", (r: UsageRow) => r.amount.tokens, fmt.tokens, fmt.axis, "Tokens"],
+  ["api", "API value", (r: UsageRow) => r.amount.apiUsd, fmt.usd, usdAxis, "API $"],
+  ["plan", "Plan cost", (r: UsageRow) => r.amount.planUsd, fmt.usd, usdAxis, "Plan $"],
+  ["fiveHour", "5h points", (r: UsageRow) => r.points.fiveHour ?? 0, fmt.pts, fmt.pts, "5h pts"],
+  ["week", "Week points", (r: UsageRow) => r.points.week ?? 0, fmt.pts, fmt.pts, "Week pts"],
+] as const satisfies readonly (readonly [Measure, string, (r: UsageRow) => number, (n: number) => string, (n: number) => string, string])[];
 
 const DIMENSIONS: [Dimension, string][] = [
   ["app", "Apps"],
@@ -230,7 +230,16 @@ export default function Usage() {
 
         <aside className="side">
           <Limits />
-          <Detail view={view} row={chosen ?? view.rows[0] ?? null} picked={chosen !== null} state={state} />
+          {selected && !chosen && (state.by !== "agent" || offPage.data) ? (
+            <section className="section pad muted" aria-live="polite">
+              The row you opened has no usage in this range.{" "}
+              <button className="quiet small" onClick={() => setParams({ sel: null })}>
+                Show the top row
+              </button>
+            </section>
+          ) : (
+            <Detail view={view} row={chosen ?? view.rows[0] ?? null} picked={chosen !== null} state={state} />
+          )}
         </aside>
       </div>
 
@@ -465,8 +474,6 @@ type MeasureDef = (typeof MEASURES)[number];
 
 const shortAccount = (label: string) => label.split("@")[0];
 
-const LIVE_RANK = { blocked: 0, working: 1, idle: 2 } as const;
-
 /** Each agent row's liveliest running session, so the dots follow the stream rather than the last usage read. */
 function useLiveRows() {
   const live = new Map<string, LiveState>();
@@ -474,7 +481,7 @@ function useLiveRows() {
   for (const [, s] of useLiveList("s:")) {
     const seen = live.get(s.row);
 
-    if (!seen || LIVE_RANK[s.state] < LIVE_RANK[seen]) live.set(s.row, s.state);
+    if (!seen || LIVE_ORDER[s.state] < LIVE_ORDER[seen]) live.set(s.row, s.state);
   }
 
   return live;
@@ -492,19 +499,10 @@ function Ranking({
   onPhoneAll: () => void;
 }) {
   const [key, , value] = measure;
-  const accounts = useLiveList("a:");
+  const { name } = useAccounts();
   const liveRows = useLiveRows();
   const liveOf = (r: UsageRow) => (view.query.by === "agent" ? (liveRows.get(r.key) ?? null) : r.live);
-  const accountLabel = (id: string) => (id && id !== "none" ? (accounts.find(([k]) => k === id)?.[1].label ?? id) : "none");
   const max = Math.max(...view.rows.map(value), 0) || 1;
-
-  const sorted: [Measure, string, string][] = [
-    ["tokens", "Tokens", "tokens"],
-    ["api", "API $", "api"],
-    ["plan", "Plan $", "plan"],
-    ["fiveHour", "5h pts", "pts"],
-    ["week", "Week pts", "pts"],
-  ];
 
   if (!view.rows.length)
     return (
@@ -524,8 +522,8 @@ function Ranking({
             <th className="n idx">#</th>
             <th>Name</th>
             <th className="share">Share · activity</th>
-            <th className="accts">Accounts</th>
-            {sorted.map(([k, label]) => (
+            <th className="accts">Points from</th>
+            {MEASURES.map(([k, , , , , label]) => (
               <th key={k} className="n" aria-sort={k === key ? "descending" : undefined}>
                 <button onClick={() => setParams({ measure: k })}>
                   {label}
@@ -565,22 +563,12 @@ function Ranking({
                 </span>
                 <Spark values={r.series} color={r.color} />
               </td>
-              <td className="accts muted small">{r.byAccount.map((a) => shortAccount(accountLabel(a.account))).join(" · ") || "–"}</td>
-              <td className="n" data-label="Tokens">
-                {fmt.tokens(r.amount.tokens)}
-              </td>
-              <td className="n" data-label="API $">
-                {fmt.usd(r.amount.apiUsd)}
-              </td>
-              <td className="n" data-label="Plan $">
-                {fmt.usd(r.amount.planUsd)}
-              </td>
-              <td className="n" data-label="5h pts">
-                {fmt.pts(r.points.fiveHour)}
-              </td>
-              <td className="n" data-label="Week pts">
-                {fmt.pts(r.points.week)}
-              </td>
+              <td className="accts muted small">{r.byAccount.map((a) => shortAccount(name(a.account))).join(" · ") || "–"}</td>
+              {MEASURES.map(([k, , valueOf, format, , label]) => (
+                <td key={k} className="n" data-label={label}>
+                  {k === "fiveHour" || k === "week" ? fmt.pts(r.points[k]) : format(valueOf(r))}
+                </td>
+              ))}
               <td className="n last muted" data-label="Last">
                 {when(r.lastActiveAt)}
               </td>
@@ -598,10 +586,7 @@ function Ranking({
 }
 
 function Limits() {
-  const accounts = useLiveList("a:").map(([, a]) => a);
-  const pool = useLive("pool");
-  const order = pool?.order ?? [];
-  const ranked = accounts.toSorted((a, b) => (order.indexOf(a.id) + 1 || 99) - (order.indexOf(b.id) + 1 || 99));
+  const { accounts: ranked, pool } = useAccounts();
 
   return (
     <section className="section" aria-labelledby="limits-title">
@@ -631,8 +616,7 @@ function Limits() {
 }
 
 function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow | null; picked: boolean; state: State }) {
-  const accounts = useLiveList("a:").map(([, a]) => a);
-  const name = (id: string) => (id && id !== "none" ? (accounts.find((a) => a.id === id)?.label ?? id) : "No account");
+  const { name } = useAccounts();
   const drills = state.by === "agent" && row !== null && row.sessions > 1;
 
   const sessions = useApi<UsageView>(
@@ -750,7 +734,6 @@ function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow |
         )}
         <p className="muted small">
           Points are estimates: each rise in an account's limit reading is split across the sessions using it then, by API value.
-          {view.coverage.limitsSince && ` Readings start ${when(view.coverage.limitsSince)}.`}
         </p>
       </div>
     </section>
@@ -762,7 +745,6 @@ function Footer({ view }: { view: UsageView }) {
 
   return (
     <footer className="foot muted small">
-      {coverage.totalApiUsd > 0 && <span>Named threads and jobs: {fmt.pct(coverage.namedApiUsd / coverage.totalApiUsd)} of API value</span>}
       <span>Limit readings since {coverage.limitsSince ? when(coverage.limitsSince) : "never"}</span>
       <span>token-tracker read {sources.trackerAt ? when(sources.trackerAt) : "never"}</span>
       {sources.devices.map((d) => (
@@ -774,6 +756,24 @@ function Footer({ view }: { view: UsageView }) {
   );
 }
 
+const CSV: [string, (r: UsageRow) => string | number | null][] = [
+  ["key", (r) => r.key],
+  ["label", (r) => r.label],
+  ["detail", (r) => r.detail],
+  ["tokens", (r) => r.amount.tokens],
+  ["input", (r) => r.amount.input],
+  ["output", (r) => r.amount.output],
+  ["cacheRead", (r) => r.amount.cacheRead],
+  ["cacheWrite", (r) => r.amount.cacheWrite],
+  ["requests", (r) => r.amount.requests],
+  ["apiUsd", (r) => r.amount.apiUsd.toFixed(4)],
+  ["planUsd", (r) => r.amount.planUsd.toFixed(4)],
+  ["fiveHourPoints", (r) => r.points.fiveHour],
+  ["weekPoints", (r) => r.points.week],
+  ["sessions", (r) => r.sessions],
+  ["lastActive", (r) => new Date(r.lastActiveAt).toISOString()],
+];
+
 const csvCell = (v: string | number | null) => {
   const text = String(v ?? "");
 
@@ -784,49 +784,11 @@ async function exportCsv(state: State, view: UsageView) {
   try {
     const all = await api<UsageView>(usagePath(state, { limit: String(Math.max(view.rowCount, 1)) }));
 
-    const head = [
-      "key",
-      "label",
-      "detail",
-      "tokens",
-      "input",
-      "output",
-      "cacheRead",
-      "cacheWrite",
-      "requests",
-      "apiUsd",
-      "planUsd",
-      "fiveHourPoints",
-      "weekPoints",
-      "sessions",
-      "lastActive",
-    ];
-
-    const lines = all.rows.map((r) =>
-      [
-        r.key,
-        r.label,
-        r.detail,
-        r.amount.tokens,
-        r.amount.input,
-        r.amount.output,
-        r.amount.cacheRead,
-        r.amount.cacheWrite,
-        r.amount.requests,
-        r.amount.apiUsd.toFixed(4),
-        r.amount.planUsd.toFixed(4),
-        r.points.fiveHour,
-        r.points.week,
-        r.sessions,
-        new Date(r.lastActiveAt).toISOString(),
-      ]
-        .map(csvCell)
-        .join(","),
-    );
+    const lines = all.rows.map((r) => CSV.map(([, cell]) => csvCell(cell(r))).join(","));
 
     const link = document.createElement("a");
 
-    link.href = URL.createObjectURL(new Blob([[head.join(","), ...lines].join("\n")], { type: "text/csv" }));
+    link.href = URL.createObjectURL(new Blob([[CSV.map(([head]) => head).join(","), ...lines].join("\n")], { type: "text/csv" }));
     link.download = `deck-usage-${state.range}-${state.by}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
