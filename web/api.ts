@@ -1,130 +1,149 @@
-import { useCallback, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
-import type { ServerEvent } from "../src/contract";
+import { QueryClient, useQuery } from "@tanstack/react-query";
+import { useSyncExternalStore } from "react";
+import type { Account, LiveSession, LiveValue, Pool, ServerEvent } from "../src/contract";
 
 export class ApiError extends Error {}
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, init);
-  const body = await response.json();
+  const body = await response.json().catch(() => ({}));
 
   if (!response.ok) throw new ApiError(body.error ?? `Request failed (${response.status})`);
 
   return body;
 }
 
-export type Body = Record<string, string | boolean>;
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+export type Body = Record<string, Json>;
 
 export const send = <T>(path: string, method: string, body?: Body) =>
   api<T>(path, body ? { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : { method });
 
 export const putText = (path: string, text: string) => api<{ ok: true }>(path, { method: "PUT", body: text });
 
-export type DeckEvent = { type: "repo"; repo: string } | { type: "ws"; id: string } | { type: "plugins" | "executor" | "drafts" };
+export const queries = new QueryClient({
+  defaultOptions: { queries: { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowFocus: false, retry: 1 } },
+});
 
-type Heard = DeckEvent | { type: "resync" };
-
-function heard(event: ServerEvent): DeckEvent[] {
-  if (event.type !== "stale") return [];
-
-  return event.tags.flatMap((tag): DeckEvent[] => {
-    const [kind, id = ""] = tag.split(":");
-
-    if (kind === "repo") return [{ type: "repo", repo: id }];
-
-    if (kind === "ws") return [{ type: "ws", id }];
-
-    return kind === "plugins" || kind === "executor" || kind === "drafts" ? [{ type: kind }] : [];
+/**
+ * A cached GET keyed by its path. It stays fresh until the server names one of its tags in a `stale` event;
+ * a tag ending in ":" matches every tag with that prefix, so "repo:" follows all repos.
+ */
+export function useApi<T>(path: string | null, ...tags: string[]) {
+  const query = useQuery({
+    queryKey: [path],
+    queryFn: () => api<T>(path!),
+    enabled: path !== null,
+    meta: { tags },
   });
+
+  return {
+    data: query.data ?? null,
+    error: query.error ? query.error.message : null,
+    fetching: query.isFetching,
+    reload: async () => void (await query.refetch()),
+  };
 }
 
-const listeners = new Set<(event: Heard) => void>();
-let source: EventSource | null = null;
+declare module "@tanstack/react-query" {
+  interface Register {
+    queryMeta: { tags: string[] };
+  }
+}
 
-const tell = (event: Heard) => {
-  for (const listener of listeners) listener(event);
+const tagged = (tags: string[], tag: string) => tags.some((t) => t === tag || (t.endsWith(":") && tag.startsWith(t)));
+
+type LiveOf<K extends string> = K extends `s:${string}`
+  ? LiveSession
+  : K extends `a:${string}`
+    ? Account
+    : K extends "pool"
+      ? Pool
+      : { connected: boolean };
+
+let live: Extract<ServerEvent, { type: "snapshot" }>["live"] = {};
+let connected = false;
+const liveListeners = new Set<() => void>();
+const lists = new Map<string, { from: Record<string, LiveValue>; list: [string, LiveValue][] }>();
+
+const subscribe = (listener: () => void) => {
+  if (!source) connect();
+  liveListeners.add(listener);
+
+  return () => liveListeners.delete(listener);
 };
+
+const publish = () => {
+  for (const listener of liveListeners) listener();
+};
+
+function apply(event: ServerEvent) {
+  if (event.type === "stale") {
+    for (const tag of event.tags) void queries.invalidateQueries({ predicate: (q) => tagged(q.meta?.tags ?? [], tag) });
+
+    return;
+  }
+
+  if (event.type === "snapshot") live = event.live;
+  else {
+    live = { ...live };
+
+    for (const [key, value] of Object.entries(event.live)) {
+      if (value === null) delete live[key];
+      else live[key] = value;
+    }
+  }
+
+  publish();
+}
+
+let source: EventSource | null = null;
 
 function connect() {
   let opened = false;
 
   source = new EventSource("/api/events");
   source.addEventListener("open", () => {
-    if (opened) tell({ type: "resync" });
+    if (opened) void queries.invalidateQueries();
 
     opened = true;
+    connected = true;
+    publish();
   });
-  source.addEventListener("message", (message) => heard(JSON.parse(message.data)).forEach(tell));
+  source.addEventListener("error", () => {
+    connected = false;
+    publish();
+  });
+  source.addEventListener("message", (message) => apply(JSON.parse(message.data)));
 }
 
-export function useDeckEvent(listener: (event: Heard) => void) {
-  const onEvent = useEffectEvent(listener);
-
-  useEffect(() => {
-    if (!source) connect();
-
-    const handle = (event: Heard) => onEvent(event);
-
-    listeners.add(handle);
-
-    return () => {
-      listeners.delete(handle);
-    };
-  }, []);
+export function useLive<K extends string>(key: K): LiveOf<K> | undefined {
+  // SAFETY: the key prefix decides the value's shape on the server (contract.ts LiveKey), so it holds here.
+  return useSyncExternalStore(subscribe, () => live[key]) as LiveOf<K> | undefined;
 }
 
-export type Load<T> = { data: T | null; error: string | null; reload: () => Promise<void> };
+/** Every live value whose key starts with the prefix, as [key without the prefix, value], in the server's order. */
+export function useLiveList<P extends "s:" | "a:" | "app:">(prefix: P): [string, LiveOf<`${P}x`>][] {
+  const list = useSyncExternalStore(subscribe, () => {
+    const cached = lists.get(prefix);
 
-type Loaded<T> = { path: string | null; data: T | null; error: string | null };
+    if (cached?.from === live) return cached.list;
 
-async function fetchLoaded<T>(path: string): Promise<Loaded<T>> {
-  try {
-    return { path, data: await api<T>(path), error: null };
-  } catch (error) {
-    return { path, data: null, error: error instanceof Error ? error.message : String(error) };
-  }
-}
+    const next = Object.keys(live)
+      .filter((k) => k.startsWith(prefix))
+      .map((k): [string, LiveValue] => [k.slice(prefix.length), live[k]]);
 
-export function useLoad<T>(
-  path: string | null,
-  refreshOn?: (event: DeckEvent) => boolean,
-  pushed?: (event: DeckEvent) => T | undefined,
-): Load<T> {
-  const [state, setState] = useState<Loaded<T>>({ path, data: null, error: null });
-  const latest = useRef(path);
+    lists.set(prefix, { from: live, list: next });
 
-  const reload = useCallback(async () => {
-    if (path === null) return;
-
-    const next = await fetchLoaded<T>(path);
-
-    if (latest.current === path) setState(next);
-  }, [path]);
-
-  useEffect(() => {
-    latest.current = path;
-    void reload();
-  }, [path, reload]);
-
-  useDeckEvent((event) => {
-    if (event.type !== "resync" && !refreshOn?.(event)) return;
-    const data = event.type === "resync" ? undefined : pushed?.(event);
-
-    if (data) setState({ path, data, error: null });
-    else void reload();
+    return next;
   });
 
-  useEffect(() => {
-    const onFocus = () => void reload();
-
-    window.addEventListener("focus", onFocus);
-
-    return () => window.removeEventListener("focus", onFocus);
-  }, [reload]);
-
-  const current = state.path === path;
-
-  return { data: current ? state.data : null, error: current ? state.error : null, reload };
+  // SAFETY: as in useLive, the prefix decides the shape.
+  return list as [string, LiveOf<`${P}x`>][];
 }
+
+export const useConnected = () => useSyncExternalStore(subscribe, () => connected);
 
 const routeListeners = new Set<() => void>();
 
@@ -140,15 +159,28 @@ export function navigate(to: string, replace = false) {
   for (const listener of routeListeners) listener();
 }
 
-export function usePath() {
-  return useSyncExternalStore(
-    (listener) => {
-      routeListeners.add(listener);
+const onRoute = (listener: () => void) => {
+  routeListeners.add(listener);
 
-      return () => routeListeners.delete(listener);
-    },
-    () => location.pathname,
-  );
+  return () => routeListeners.delete(listener);
+};
+
+export const usePath = () => useSyncExternalStore(onRoute, () => location.pathname);
+
+export const useSearch = () => useSyncExternalStore(onRoute, () => location.search);
+
+/** Sets URL query params; null or "" removes one. Typing in a field replaces the entry, a click pushes one. */
+export function setParams(patch: Record<string, string | null>, replace = false) {
+  const params = new URLSearchParams(location.search);
+
+  for (const [key, value] of Object.entries(patch)) {
+    if (value) params.set(key, value);
+    else params.delete(key);
+  }
+
+  const search = params.toString();
+
+  navigate(location.pathname + (search ? `?${search}` : ""), replace);
 }
 
 const UNITS: [limit: number, size: number, unit: Intl.RelativeTimeFormatUnit][] = [

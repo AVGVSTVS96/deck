@@ -4,7 +4,7 @@ import type { GitStatusEntry } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { Changes, Draft, FileBody, RepoSummary, Workspace } from "../../src/types";
-import { navigate, putText, send, useLoad } from "../api";
+import { navigate, putText, send, useApi } from "../api";
 import { Busy, Empty, Link, fail, toast, useAction } from "../ui";
 
 const DRAFTS = "drafts";
@@ -20,10 +20,10 @@ function parse(path: string) {
   return { ws: decodeURIComponent(ws), file: rest.map(decodeURIComponent).join("/") };
 }
 
-export function Files({ path }: { path: string }) {
+export default function Files({ path }: { path: string }) {
   const route = parse(path);
-  const repos = useLoad<RepoSummary[]>("/repos", (e) => e.type === "repo" || e.type === "ws");
-  const drafts = useLoad<Draft[]>("/drafts");
+  const repos = useApi<RepoSummary[]>("/repos", "repo:", "ws:");
+  const drafts = useApi<Draft[]>("/drafts", "drafts");
   const [treeOpen, setTreeOpen] = useState(false);
 
   useEffect(() => {
@@ -43,19 +43,19 @@ export function Files({ path }: { path: string }) {
   return (
     <div className="files">
       <header className="sources">
-        <div className="repo-tabs" role="tablist">
+        <nav className="repo-tabs" aria-label="Repos">
           {repos.data.map((r) => (
-            <Link key={r.id} to={fileUrl(r.id)} className={repo?.id === r.id && !isDrafts ? "tab on" : "tab"}>
+            <Link key={r.id} to={fileUrl(r.id)} current={repo?.id === r.id && !isDrafts}>
               {r.name}
-              {r.workspaces.length > 1 && <span className="count wt">{r.workspaces.length - 1}</span>}
+              {r.workspaces.length > 1 && <span className="count">{r.workspaces.length - 1}</span>}
             </Link>
           ))}
           {(drafts.data?.length ?? 0) > 0 && (
-            <Link to={fileUrl(DRAFTS)} className={isDrafts ? "tab on" : "tab"}>
+            <Link to={fileUrl(DRAFTS)} current={isDrafts}>
               drafts<span className="count">{drafts.data!.length}</span>
             </Link>
           )}
-        </div>
+        </nav>
         {repo && !isDrafts && <WorkspaceBar repo={repo} current={route.ws} file={route.file} />}
       </header>
       <div className={["panes", treeOpen && "tree-open", isDrafts && "no-side"].filter(Boolean).join(" ")}>
@@ -114,15 +114,15 @@ function WorkspaceBar({ repo, current, file }: { repo: RepoSummary; current: str
     });
 
   return (
-    <div className="ws-bar">
+    <nav className="ws-bar" aria-label="Checkouts">
       {repo.workspaces.map((ws) => (
-        <Link key={ws.id} to={fileUrl(ws.id, file)} className={ws.id === current ? "ws on" : "ws"}>
+        <Link key={ws.id} to={fileUrl(ws.id, file)} current={ws.id === current}>
           <span className={ws.name ? "dot wt" : "dot live"} />
           {ws.name ?? `live · ${ws.branch ?? "detached"}`}
         </Link>
       ))}
       {naming === null ? (
-        <button className="ws add" onClick={() => setNaming(file ? nameFor(file) : "edit")}>
+        <button className="ws-add" onClick={() => setNaming(file ? nameFor(file) : "edit")}>
           + worktree
         </button>
       ) : (
@@ -152,20 +152,14 @@ function WorkspaceBar({ repo, current, file }: { repo: RepoSummary; current: str
           </button>
         </form>
       )}
-    </div>
+    </nav>
   );
 }
 
 function WorkspaceTree({ ws, selected, onPick }: { ws: Workspace; selected: string; onPick: (path: string) => void }) {
-  const files = useLoad<string[]>(
-    `/ws/${encodeURIComponent(ws.id)}/files`,
-    (e) => (e.type === "ws" && e.id === ws.id) || (e.type === "repo" && e.repo === ws.repo),
-  );
+  const files = useApi<string[]>(`/ws/${encodeURIComponent(ws.id)}/files`, `ws:${ws.id}`, `repo:${ws.repo}`);
 
-  const changes = useLoad<Changes>(
-    `/ws/${encodeURIComponent(ws.id)}/changes`,
-    (e) => (e.type === "ws" && e.id === ws.id) || (e.type === "repo" && e.repo === ws.repo),
-  );
+  const changes = useApi<Changes>(`/ws/${encodeURIComponent(ws.id)}/changes`, `ws:${ws.id}`, `repo:${ws.repo}`);
 
   const status = useMemo<GitStatusEntry[]>(
     () => changes.data?.files.map((c) => ({ path: c.path, status: c.status })) ?? [],
@@ -261,10 +255,11 @@ function PathTree({
 function Viewer({ ws, path }: { ws: Workspace; path: string }) {
   const [editing, setEditing] = useState(() => sessionStorage.getItem("deck:edit") === `${ws.id}:${path}`);
 
-  const body = useLoad<FileBody>(
-    fileApi(ws.id, path),
-    (e) => !editing && ((e.type === "ws" && e.id === ws.id) || (e.type === "repo" && e.repo === ws.repo)),
-  );
+  const live = useApi<FileBody>(fileApi(ws.id, path), `ws:${ws.id}`, `repo:${ws.repo}`);
+  const [held, setHeld] = useState<FileBody | null>(null);
+
+  if (editing && !held && live.data) setHeld(live.data);
+  const body = { ...live, data: editing ? (held ?? live.data) : live.data };
 
   const [draft, setDraft] = useState<string | null>(null);
   const [mode, setMode] = useState<"file" | "diff" | null>(null);
@@ -316,11 +311,11 @@ function Viewer({ ws, path }: { ws: Workspace; path: string }) {
         </div>
         <div className="actions">
           <div className="seg" role="group">
-            <button className={shown === "file" ? "on" : ""} onClick={() => setMode("file")}>
+            <button aria-pressed={shown === "file"} onClick={() => setMode("file")}>
               File
             </button>
             <button
-              className={shown === "diff" ? "on" : ""}
+              aria-pressed={shown === "diff"}
               disabled={!changed}
               onClick={() => setMode("diff")}
               title={changed ? `Against ${ws.name ? "where this worktree started" : "the last commit"}` : "No changes"}
@@ -328,14 +323,15 @@ function Viewer({ ws, path }: { ws: Workspace; path: string }) {
               Changes
             </button>
           </div>
-          <span className="save-state">{editing ? saver.label : ""}</span>
+          <span className="muted small">{editing ? saver.label : ""}</span>
           {editing ? (
             <button
               className="primary"
               onClick={() => {
                 setEditing(false);
                 setDraft(null);
-                void body.reload();
+                setHeld(null);
+                void live.reload();
               }}
             >
               Done
@@ -406,10 +402,7 @@ function useSaver(ws: string, path: string) {
 }
 
 function ChangesPanel({ ws, repo, file }: { ws: Workspace; repo: RepoSummary; file: string }) {
-  const changes = useLoad<Changes>(
-    `/ws/${encodeURIComponent(ws.id)}/changes`,
-    (e) => (e.type === "ws" && e.id === ws.id) || (e.type === "repo" && e.repo === ws.repo),
-  );
+  const changes = useApi<Changes>(`/ws/${encodeURIComponent(ws.id)}/changes`, `ws:${ws.id}`, `repo:${ws.repo}`);
 
   const [message, setMessage] = useState("");
   const { busy, run } = useAction();
@@ -462,9 +455,15 @@ function ChangesPanel({ ws, repo, file }: { ws: Workspace; repo: RepoSummary; fi
     <aside className="changes-pane">
       {ws.name ? (
         <div className="flow">
-          <span className="chip wt">{ws.branch}</span>
-          <span className="arrow">→</span>
-          <span className="chip live">{ws.base}</span>
+          <span className="chip">
+            <span className="dot wt" />
+            {ws.branch}
+          </span>
+          <span className="muted">→</span>
+          <span className="chip">
+            <span className="dot live" />
+            {ws.base}
+          </span>
         </div>
       ) : (
         <p className="note">
@@ -474,14 +473,17 @@ function ChangesPanel({ ws, repo, file }: { ws: Workspace; repo: RepoSummary; fi
       {c && ws.name && (
         <div className="counts">
           <span title="Commits on this worktree that the live branch doesn't have">
-            <b>{c.ahead}</b> to ship
+            <b>{c.ahead}</b>to ship
           </span>
           <span title={`Commits on ${ws.base} since this worktree started; shipping rebases onto them`}>
-            <b>{c.behind}</b> new on {ws.base}
+            <b>{c.behind}</b>new on {ws.base}
           </span>
         </div>
       )}
-      <h3>{ws.name ? "Changed here" : "Uncommitted in live"}</h3>
+      <h3>
+        {ws.name ? "Changed here" : "Uncommitted in live"}
+        {c && <span className="num">{c.files.length}</span>}
+      </h3>
       {c?.files.length ? (
         <ul className="change-list">
           {c.files.slice(0, LIST_CAP).map((f) => (
@@ -535,8 +537,8 @@ function ChangesPanel({ ws, repo, file }: { ws: Workspace; repo: RepoSummary; fi
 }
 
 function DraftViewer({ draft, repos }: { draft: Draft | null; repos: RepoSummary[] }) {
-  const text = useLoad<{ contents: string }>(draft ? `/drafts/${encodeURIComponent(draft.name)}` : null);
-  const live = useLoad<FileBody>(draft?.target ? fileApi(draft.target.repo, draft.target.path) : null);
+  const text = useApi<{ contents: string }>(draft ? `/drafts/${encodeURIComponent(draft.name)}` : null, "drafts");
+  const live = useApi<FileBody>(draft?.target ? fileApi(draft.target.repo, draft.target.path) : null, `repo:${draft?.target?.repo}`);
   const { busy, run } = useAction();
 
   if (!draft) return <Empty>No such draft.</Empty>;
