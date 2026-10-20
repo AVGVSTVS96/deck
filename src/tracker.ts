@@ -62,7 +62,8 @@ async function read(url: string, range: Range, timezone: string): Promise<Tracke
 
 /**
  * The only token-tracker client. Each range loads in the background: 7d every 5 minutes while a tab is open,
- * the others once asked for and again while asked for in the last 10 minutes. A request never waits on a warm range.
+ * the others once asked for and again while asked for in the last 10 minutes. A request never waits on a warm range;
+ * one older than 5 minutes reloads behind it. Only sessions and limit windows are news: every read moves the clock fields.
  */
 export function tracker(url: string, timezone: string, watching: () => boolean) {
   const viewed = new Map<Range, number>([["7d", 0]]);
@@ -75,6 +76,7 @@ export function tracker(url: string, timezone: string, watching: () => boolean) 
         load: () => read(url, range, timezone),
         everyMs: EVERY_MS,
         active: () => (range === "7d" && watching()) || Date.now() - (viewed.get(range) ?? 0) < VIEWED_MS,
+        news: ({ sessions, windows }) => JSON.stringify([sessions, windows]),
       }),
     ]),
   );
@@ -86,6 +88,7 @@ export function tracker(url: string, timezone: string, watching: () => boolean) 
       viewed.set(range, Date.now());
 
       if (data.value === undefined) await data.ready();
+      else if (Date.now() - data.at > EVERY_MS) void data.ready();
 
       return { value: data.value, at: data.at || null, error: data.error };
     },

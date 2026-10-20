@@ -136,70 +136,48 @@ function partsOf(session: TrackedSession, names: Names): Part[] {
   });
 }
 
-const dimensionOf = (part: Part, dimension: Dimension): string => {
-  switch (dimension) {
-    case "app":
-      return appOf(part.who);
-    case "harness":
-      return part.session.harness;
-    case "model":
-      return part.model;
-    case "project":
-      return projectOf(part.session);
-    case "device":
-      return part.session.deviceId;
-    case "account":
-      return part.account;
-  }
+const DIMENSION: Record<Dimension, (part: Part) => string> = {
+  app: (part) => appOf(part.who),
+  harness: (part) => part.session.harness,
+  model: (part) => part.model,
+  project: (part) => projectOf(part.session),
+  device: (part) => part.session.deviceId,
+  account: (part) => part.account,
 };
 
-function keyOf(part: Part, by: GroupBy) {
-  switch (by) {
-    case "agent":
-      return part.agent;
-    case "session":
-      return `s:${part.session.key}`;
-    case "project":
-      return `p:${projectOf(part.session)}`;
-    case "model":
-      return `m:${part.model}`;
-    case "harness":
-      return `h:${part.session.harness}`;
-    case "device":
-      return `d:${part.session.deviceId}`;
-    case "account":
-      return `a:${part.account}`;
-  }
-}
+/** What people call a dimension's value: account and device labels, "No account" for unbound requests. */
+function nameOf(dimension: Dimension, id: string, labels: Labels) {
+  if (dimension === "account") return id === NO_ACCOUNT ? "No account" : (labels.accounts[id] ?? id);
 
-const accountLabel = (id: string, labels: Labels) => (id === NO_ACCOUNT ? "No account" : (labels.accounts[id] ?? id));
+  return dimension === "device" ? (labels.devices[id] ?? id) : id;
+}
 
 type Description = { label: string; detail: string; who: Who | null };
 
-function describe(part: Part, by: GroupBy, labels: Labels): Description {
-  const { session } = part;
+const named =
+  (dimension: Dimension) =>
+  (part: Part, labels: Labels): Description => ({ label: nameOf(dimension, DIMENSION[dimension](part), labels), detail: "", who: null });
 
-  switch (by) {
-    case "agent":
-      return { ...labelOf(part.who), who: part.who };
-    case "session":
-      return {
-        label: session.title ?? labelOf(part.who).label,
-        detail: [basename(projectOf(session)), session.harness, session.sessionId.slice(0, 8)].join(" · "),
-        who: part.who,
-      };
-    case "project":
-      return { label: basename(projectOf(session)) || projectOf(session), detail: projectOf(session), who: null };
-    case "model":
-      return { label: part.model, detail: "", who: null };
-    case "harness":
-      return { label: session.harness, detail: "", who: null };
-    case "device":
-      return { label: labels.devices[session.deviceId] ?? session.deviceId, detail: "", who: null };
-    case "account":
-      return { label: accountLabel(part.account, labels), detail: "", who: null };
-  }
-}
+/** Each grouping's row key and how its row reads. */
+const GROUPING: Record<GroupBy, { key: (part: Part) => string; describe: (part: Part, labels: Labels) => Description }> = {
+  agent: { key: (part) => part.agent, describe: (part) => ({ ...labelOf(part.who), who: part.who }) },
+  session: {
+    key: (part) => `s:${part.session.key}`,
+    describe: ({ session, who }) => ({
+      label: session.title ?? labelOf(who).label,
+      detail: [basename(projectOf(session)), session.harness, session.sessionId.slice(0, 8)].join(" · "),
+      who,
+    }),
+  },
+  project: {
+    key: (part) => `p:${projectOf(part.session)}`,
+    describe: ({ session }) => ({ label: basename(projectOf(session)) || projectOf(session), detail: projectOf(session), who: null }),
+  },
+  model: { key: (part) => `m:${part.model}`, describe: named("model") },
+  harness: { key: (part) => `h:${part.session.harness}`, describe: named("harness") },
+  device: { key: (part) => `d:${part.session.deviceId}`, describe: named("device") },
+  account: { key: (part) => `a:${part.account}`, describe: named("account") },
+};
 
 const SERIES_COLUMN: Record<Measure, number> = { tokens: 1, api: 2, plan: 3, fiveHour: 4, week: 5 };
 
@@ -211,7 +189,7 @@ type Group = {
   amount: Amount;
   fiveHour: number;
   week: number;
-  byAccount: Map<string, { fiveHour: number; week: number }>;
+  byAccount: Map<string, { apiUsd: number; fiveHour: number; week: number }>;
   sessions: Set<string>;
   sessionIds: Set<string>;
   lastActiveAt: number;
@@ -223,13 +201,13 @@ function group(parts: Part[], by: GroupBy, measure: Measure, buckets: number, la
   const column = SERIES_COLUMN[measure];
 
   for (const part of parts) {
-    const key = keyOf(part, by);
+    const key = GROUPING[by].key(part);
     let g = groups.get(key);
 
     if (!g) {
       g = {
         key,
-        ...describe(part, by, labels),
+        ...GROUPING[by].describe(part, labels),
         amount: zero(),
         fiveHour: 0,
         week: 0,
@@ -249,9 +227,10 @@ function group(parts: Part[], by: GroupBy, measure: Measure, buckets: number, la
     g.sessionIds.add(part.session.sessionId);
     g.lastActiveAt = Math.max(g.lastActiveAt, part.session.lastAt);
 
-    if (part.fiveHour || part.week) {
-      const account = g.byAccount.get(part.account) ?? { fiveHour: 0, week: 0 };
+    if (part.amount.tokens || part.fiveHour || part.week) {
+      const account = g.byAccount.get(part.account) ?? { apiUsd: 0, fiveHour: 0, week: 0 };
 
+      account.apiUsd += part.amount.apiUsd;
       account.fiveHour += part.fiveHour;
       account.week += part.week;
       g.byAccount.set(part.account, account);
@@ -274,7 +253,8 @@ const valueOf = (g: Pick<Group, "amount" | "fiveHour" | "week">, measure: Measur
           ? g.fiveHour
           : g.week;
 
-const STRENGTH: Record<LiveState, number> = { working: 3, blocked: 2, idle: 1 };
+/** The browser's order too: a row with a blocked session reads blocked even while another works. */
+const STRENGTH: Record<LiveState, number> = { blocked: 3, working: 2, idle: 1 };
 
 function liveOf(key: string, sessionIds: Set<string>, live: LiveSession[]): LiveState | null {
   let best: LiveState | null = null;
@@ -349,7 +329,7 @@ export function usageView(
 
   const parts = all.filter(
     (part) =>
-      filters.every(({ dimension, values }) => values.includes(dimensionOf(part, dimension))) &&
+      filters.every(({ dimension, values }) => values.includes(DIMENSION[dimension](part))) &&
       (!query.within || part.agent === query.within),
   );
 
@@ -430,18 +410,15 @@ export function usageView(
     const sessions = new Map<string, Set<string>>();
 
     for (const part of all) {
-      const value = dimensionOf(part, dimension);
+      const value = DIMENSION[dimension](part);
       const set = sessions.get(value) ?? new Set();
 
       set.add(part.session.key);
       sessions.set(value, set);
     }
 
-    const label = (id: string) =>
-      dimension === "account" ? accountLabel(id, labels) : dimension === "device" ? (labels.devices[id] ?? id) : id;
-
     return [...sessions]
-      .map(([id, set]) => ({ id, label: label(id), count: set.size }))
+      .map(([id, set]) => ({ id, label: nameOf(dimension, id, labels), count: set.size }))
       .toSorted((a, b) => b.count - a.count)
       .slice(0, 100);
   };
@@ -473,8 +450,8 @@ export function usageView(
       amount: g.amount,
       points: points(g),
       byAccount: [...g.byAccount]
-        .map(([account, p]): AccountPoints => ({ account, ...p }))
-        .toSorted((a, b) => (b.week ?? 0) - (a.week ?? 0)),
+        .toSorted(([, a], [, b]) => b.apiUsd - a.apiUsd)
+        .map(([account, p]): AccountPoints => ({ account, ...points(p) })),
       sessions: g.sessions.size,
       lastActiveAt: g.lastActiveAt,
       series: g.series,

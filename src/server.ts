@@ -69,27 +69,43 @@ function labels(): Labels {
   };
 }
 
-const watching = new Set<string>();
+const watching = new Map<string, () => void>();
 
+/** Watches every repo, workspace and settings file once, and lets go of workspaces that are gone, so one re-created at the same path gets a fresh watcher. */
 async function watchFiles() {
-  const watchOnce = (path: string, tag: string, recursive: boolean, only: RegExp) => {
-    if (watching.has(path)) return;
-    watching.add(path);
-    watch([{ path, recursive, only }], () => stream.stale(tag), 80);
-  };
+  const wanted: [path: string, tag: string, recursive: boolean, only: RegExp][] = [
+    [config.claude, "plugins", false, /^settings\.json$/],
+    [join(config.claude, "plugins"), "plugins", false, /^installed_plugins\.json$/],
+  ];
+
+  if (config.drafts) wanted.push([config.drafts.dir, "drafts", false, /^[^.]/]);
 
   for (const repo of config.repos) {
-    watchOnce(join(repo.path, ".git"), `repo:${repo.id}`, true, /^(index|HEAD|refs\/(?!t3\/)|logs|COMMIT_EDITMSG|ORIG_HEAD)(?!.*\.lock$)/);
+    wanted.push([
+      join(repo.path, ".git"),
+      `repo:${repo.id}`,
+      true,
+      /^(index|HEAD|refs\/(?!t3\/)|logs|COMMIT_EDITMSG|ORIG_HEAD)(?!.*\.lock$)/,
+    ]);
 
-    for (const ws of await repos.workspaces(repo)) {
-      if (ws.name) watchOnce(ws.path, `ws:${ws.id}`, true, /^(?!\.git(\/|$))/);
-    }
+    for (const ws of await repos.workspaces(repo)) if (ws.name) wanted.push([ws.path, `ws:${ws.id}`, true, /^(?!\.git(\/|$))/]);
   }
 
-  watchOnce(config.claude, "plugins", false, /^settings\.json$/);
-  watchOnce(join(config.claude, "plugins"), "plugins", false, /^installed_plugins\.json$/);
+  const paths = new Set(wanted.map(([path]) => path));
 
-  if (config.drafts) watchOnce(config.drafts.dir, "drafts", false, /^[^.]/);
+  for (const [path, stop] of watching) {
+    if (paths.has(path)) continue;
+    stop();
+    watching.delete(path);
+  }
+
+  for (const [path, tag, recursive, only] of wanted) {
+    if (!watching.has(path))
+      watching.set(
+        path,
+        watch([{ path, recursive, only }], () => stream.stale(tag), 80),
+      );
+  }
 }
 
 const ownHosts = new Set([config.host, hostname(), "localhost", "127.0.0.1"].map((name) => `${name}:${config.port}`));
@@ -255,7 +271,14 @@ const server = Bun.serve({
       }),
     },
     "/api/repos/:repo/push": { POST: json((req) => repos.push(param(req, "repo"))) },
-    "/api/ws/:ws": { DELETE: json((req) => repos.discard(param(req, "ws"))) },
+    "/api/ws/:ws": {
+      DELETE: json(async (req) => {
+        const result = await repos.discard(param(req, "ws"));
+        await watchFiles();
+
+        return result;
+      }),
+    },
     "/api/ws/:ws/files": json((req) => repos.files(param(req, "ws"))),
     "/api/ws/:ws/changes": json((req) => repos.changes(param(req, "ws"))),
     "/api/ws/:ws/file": {
