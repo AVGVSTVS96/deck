@@ -19,6 +19,8 @@ export type TrackedSession = {
   /** Sparse: [bucket index, tokens, API $, plan $, five-hour points, week points]. */
   series: [number, number, number, number, number, number][];
   limits: { account: string; kind: Kind; points: number }[];
+  /** The amount per account each request was bound to at its own time; "none" for unbound requests. */
+  accounts: Record<string, Amount>;
 };
 
 /** token-tracker's GetSessionUsage answer for one range. */

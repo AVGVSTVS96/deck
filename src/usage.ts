@@ -23,7 +23,7 @@ const MEASURES: Measure[] = ["tokens", "api", "plan", "fiveHour", "week"];
 const DIMENSIONS: Dimension[] = ["app", "harness", "model", "project", "device", "account"];
 const COLORS = 7;
 
-/** The account of a session no limit rise was charged to. */
+/** token-tracker's account for requests bound to no account, such as Codex or unpooled sessions. */
 const NO_ACCOUNT = "none";
 
 /** One session's share of one model on one account. Parts of a session sum back to the session exactly. */
@@ -76,31 +76,44 @@ function add(into: Amount, amount: Amount, by = 1) {
 
 const ratio = (part: number, whole: number) => (whole ? part / whole : 0);
 
+/** Field by field, the part of `whole` that is both `a` and `b`, assuming they overlap in proportion. Sums back to `a` over a full set of `b`, and the reverse. */
+function overlap(a: Amount, b: Amount, whole: Amount) {
+  const out = zero();
+
+  for (const field of FIELDS) out[field] = whole[field] ? (a[field] * b[field]) / whole[field] : 0;
+
+  return out;
+}
+
+/**
+ * A session split into model × account parts. token-tracker gives the amount per model and per account exactly;
+ * a part is their overlap. Limit points belong to their account and split across models by API $.
+ */
 function partsOf(session: TrackedSession, names: Names): Part[] {
   const who = whoOf(names, session);
   const agent = rowOf(who, session.key);
-  const models = Object.keys(session.models).length ? Object.entries(session.models) : [["unknown", session.amount] as const];
-
+  const { amount } = session;
+  const models = Object.keys(session.models).length ? Object.entries(session.models) : [["unknown", amount] as const];
+  const amounts = new Map(Object.keys(session.accounts).length ? Object.entries(session.accounts) : [[NO_ACCOUNT, amount] as const]);
   const kinds = { fiveHour: 0, week: 0 };
-  const accounts = new Map<string, { fiveHour: number; week: number }>();
+  const points = new Map<string, { fiveHour: number; week: number }>();
 
-  for (const { account, kind, points } of session.limits) {
-    const entry = accounts.get(account) ?? { fiveHour: 0, week: 0 };
+  for (const { account, kind, points: charged } of session.limits) {
+    const entry = points.get(account) ?? { fiveHour: 0, week: 0 };
 
-    entry[kind] += points;
-    kinds[kind] += points;
-    accounts.set(account, entry);
+    entry[kind] += charged;
+    kinds[kind] += charged;
+    points.set(account, entry);
   }
 
-  const total = kinds.fiveHour + kinds.week;
-  const charged = [...accounts].filter(([, points]) => points.fiveHour + points.week > 0);
-  const split = charged.length ? charged : [[NO_ACCOUNT, { fiveHour: 0, week: 0 }] as const];
+  const accounts = [...new Set([...amounts.keys(), ...points.keys()])];
 
   return models.flatMap(([model, modelAmount]) => {
-    const api = session.amount.apiUsd ? ratio(modelAmount.apiUsd, session.amount.apiUsd) : ratio(modelAmount.tokens, session.amount.tokens);
+    const api = amount.apiUsd ? ratio(modelAmount.apiUsd, amount.apiUsd) : ratio(modelAmount.tokens, amount.tokens);
 
-    return split.map(([account, points]) => {
-      const weight = charged.length ? ratio(points.fiveHour + points.week, total) : 1;
+    return accounts.map((account) => {
+      const accountAmount = amounts.get(account) ?? zero();
+      const charged = points.get(account) ?? { fiveHour: 0, week: 0 };
 
       return {
         session,
@@ -108,15 +121,15 @@ function partsOf(session: TrackedSession, names: Names): Part[] {
         agent,
         model,
         account,
-        amount: add(zero(), modelAmount, weight),
-        fiveHour: points.fiveHour * api,
-        week: points.week * api,
+        amount: overlap(modelAmount, accountAmount, amount),
+        fiveHour: charged.fiveHour * api,
+        week: charged.week * api,
         scale: [
-          ratio(modelAmount.tokens, session.amount.tokens) * weight,
-          ratio(modelAmount.apiUsd, session.amount.apiUsd) * weight,
-          ratio(modelAmount.planUsd, session.amount.planUsd) * weight,
-          ratio(points.fiveHour, kinds.fiveHour) * api,
-          ratio(points.week, kinds.week) * api,
+          ratio(modelAmount.tokens, amount.tokens) * ratio(accountAmount.tokens, amount.tokens),
+          ratio(modelAmount.apiUsd, amount.apiUsd) * ratio(accountAmount.apiUsd, amount.apiUsd),
+          ratio(modelAmount.planUsd, amount.planUsd) * ratio(accountAmount.planUsd, amount.planUsd),
+          ratio(charged.fiveHour, kinds.fiveHour) * api,
+          ratio(charged.week, kinds.week) * api,
         ],
       };
     });
