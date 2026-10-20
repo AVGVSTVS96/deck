@@ -68,7 +68,7 @@ const liveListeners = new Set<() => void>();
 const lists = new Map<string, { from: Record<string, LiveValue>; list: [string, LiveValue][] }>();
 
 const subscribe = (listener: () => void) => {
-  if (!source) connect();
+  if (!source && !document.hidden) connect();
   liveListeners.add(listener);
 
   return () => liveListeners.delete(listener);
@@ -99,10 +99,9 @@ function apply(event: ServerEvent) {
 }
 
 let source: EventSource | null = null;
+let opened = false;
 
 function connect() {
-  let opened = false;
-
   source = new EventSource("/api/events");
   source.addEventListener("open", () => {
     if (opened) void queries.invalidateQueries();
@@ -117,6 +116,19 @@ function connect() {
   });
   source.addEventListener("message", (message) => apply(JSON.parse(message.data)));
 }
+
+/**
+ * A hidden tab gives its stream back: the browser allows six connections per host over HTTP/1.1, so six open tabs
+ * would otherwise starve every request. Showing the tab again reconnects, takes a fresh snapshot and refetches.
+ */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    source?.close();
+    source = null;
+    connected = false;
+    publish();
+  } else if (!source && liveListeners.size) connect();
+});
 
 export function useLive<K extends string>(key: K): LiveOf<K> | undefined {
   // SAFETY: the key prefix decides the value's shape on the server (contract.ts LiveKey), so it holds here.
