@@ -4,6 +4,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import type { BunRequest } from "bun";
 import app from "../web/index.html";
+import { Tokenhub } from "./accounts";
 import { agents } from "./agents";
 import { loadConfig } from "./config";
 import { Events } from "./events";
@@ -16,6 +17,7 @@ const config = await loadConfig();
 const repos = new Git(config);
 const events = new Events();
 const executor = config.executor ? new Executor(config.executor) : null;
+const tokenhub = config.tokenhub ? new Tokenhub(config.tokenhub) : null;
 
 async function watchAll() {
   const workspaces = await Promise.all(config.repos.map((repo) => repos.workspaces(repo)));
@@ -112,6 +114,12 @@ const needExecutor = () => {
   return executor;
 };
 
+const needTokenhub = () => {
+  if (!tokenhub) throw new Error("tokenhub isn't set up in deck's config.");
+
+  return tokenhub;
+};
+
 async function drafts(): Promise<Draft[]> {
   if (!config.drafts) return [];
   const { dir, targets } = config.drafts;
@@ -178,6 +186,19 @@ const server = Bun.serve({
     "/api/executor/:slug/deploy": { POST: json((req) => needExecutor().deploy(param(req, "slug"))) },
     "/api/executor/:slug/connect": {
       POST: json(async (req) => needExecutor().connect(param(req, "slug"), (await req.json()).requirement)),
+    },
+    "/api/accounts": json(() => needTokenhub().accounts()),
+    "/api/accounts/settings": {
+      POST: json(async (req) => {
+        const { operation, settings, revision } = await req.json();
+
+        return needTokenhub().settings(operation === "save" ? "save" : "preview", settings, revision);
+      }),
+    },
+    "/api/accounts/connect": { POST: json(async (req) => needTokenhub().connect(String((await req.json()).email ?? ""))) },
+    "/api/accounts/connect/:id": {
+      GET: json((req) => needTokenhub().connection(param(req, "id"))),
+      POST: json(async (req) => needTokenhub().connection(param(req, "id"), String((await req.json()).code ?? ""))),
     },
     "/api/*": () => Response.json({ error: "not found" }, { status: 404 }),
     "/*": app,
