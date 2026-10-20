@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { usePath } from "./api";
 import { Link, Toasts } from "./ui";
+import { Accounts } from "./views/Accounts";
 import { Agents } from "./views/Agents";
 import { Executor } from "./views/Executor";
 import { Files } from "./views/Files";
@@ -15,6 +16,7 @@ const ICONS = {
   agents: "M2.5 3.5h11v8h-11ZM5 6l2 1.5L5 9M8.5 9H11M6 13.5h4",
   plugins: "M6 2v3M10 2v3M4.5 5h7v2.5a3.5 3.5 0 0 1-7 0ZM8 11v3",
   executor: "M9 1.5 4 9h4l-1 5.5L12 7H8Z",
+  accounts: "M8 7.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3 13.5c.6-2.4 2.6-4 5-4s4.4 1.6 5 4",
 };
 
 const VIEWS = [
@@ -23,6 +25,7 @@ const VIEWS = [
   { path: "/agents", label: "Agents", icon: ICONS.agents },
   { path: "/plugins", label: "Plugins", icon: ICONS.plugins },
   { path: "/executor", label: "Executor", icon: ICONS.executor },
+  { path: "/accounts", label: "Accounts", icon: ICONS.accounts },
 ];
 
 function viewOf(path: string) {
@@ -57,6 +60,7 @@ function App() {
         {view.path === "/agents" && <Agents />}
         {view.path === "/plugins" && <Plugins />}
         {view.path === "/executor" && <Executor path={path} />}
+        {view.path === "/accounts" && <Accounts />}
       </main>
       <Toasts />
     </div>

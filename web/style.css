@@ -1412,3 +1412,592 @@ textarea:focus {
     display: none;
   }
 }
+
+/* accounts */
+
+.acct-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.bad-text {
+  color: var(--bad);
+}
+
+.acct-alert {
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bad-bg);
+  color: var(--bad);
+  font-size: 13px;
+}
+
+.acct-key {
+  margin: 0 0 10px;
+}
+
+.key-fill,
+.key-tick,
+.key-time {
+  display: inline-block;
+  flex: none;
+}
+
+.key-fill {
+  width: 14px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--ink-3);
+}
+
+.key-tick {
+  width: 2px;
+  height: 11px;
+  border-radius: 1px;
+  background: var(--ink);
+}
+
+.key-time,
+.win-time {
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-bottom: 5px solid var(--ink-2);
+  border-top: 0;
+}
+
+.acct-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 12px;
+}
+
+.acct-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.acct-card.out {
+  border-style: dashed;
+  background: var(--sunk);
+}
+
+.acct-card .pool-title {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.acct-card .who {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.acct-card .chip {
+  margin-left: auto;
+}
+
+.acct-plan {
+  margin-top: -8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.acct-out {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.win {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.win .meter-label .num {
+  font-weight: 600;
+}
+
+.win .meter-track {
+  margin-bottom: 4px;
+}
+
+.win-time {
+  position: absolute;
+  top: calc(100% + 2px);
+  margin-left: -4px;
+}
+
+.win.lapsed .meter-fill {
+  opacity: 0.3;
+}
+
+.win-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.acct-facts {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  row-gap: 5px;
+}
+
+.acct-facts b {
+  font-weight: 600;
+}
+
+.held {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 4px;
+}
+
+.held-mark,
+.lg-held,
+.week-held {
+  width: 7px;
+  height: 7px;
+  transform: rotate(45deg);
+  border: 1.5px solid var(--wt);
+  background: var(--panel);
+  flex: none;
+}
+
+.held-mark {
+  align-self: center;
+  margin-right: 3px;
+}
+
+.acct-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.acct-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.acct-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.acct-legend i {
+  display: inline-block;
+}
+
+.lg-week {
+  width: 18px;
+  height: 6px;
+  border-radius: 99px 0 0 99px;
+  background: color-mix(in oklab, var(--ink-3) 35%, transparent);
+  box-shadow:
+    4px 0 0 -1px var(--panel),
+    7px 0 0 0 var(--ink-2);
+  margin-right: 6px;
+}
+
+.lg-out {
+  width: 2px;
+  height: 12px;
+  background: var(--bad);
+  border-radius: 1px;
+}
+
+.week {
+  display: grid;
+  grid-template-columns: minmax(110px, 190px) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 14px 12px;
+}
+
+.week-axis {
+  position: relative;
+  height: 22px;
+}
+
+.week-axis span {
+  position: absolute;
+  top: 4px;
+  padding-left: 6px;
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.week-row {
+  display: contents;
+}
+
+.week-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  height: 36px;
+}
+
+.week-who > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-track {
+  position: relative;
+  height: 36px;
+  border-top: 1px solid var(--line);
+}
+
+.week-row:first-of-type .week-track {
+  border-top-color: transparent;
+}
+
+.week-track > * {
+  position: absolute;
+}
+
+.week-day {
+  top: -1px;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+
+.week-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--ink-3);
+}
+
+.week-band {
+  left: 0;
+  top: 15px;
+  height: 6px;
+  border-radius: 99px 0 0 99px;
+  background: color-mix(in oklab, var(--hue) 28%, transparent);
+}
+
+.week-reset {
+  top: 11px;
+  width: 2px;
+  height: 14px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--hue);
+}
+
+.week-label {
+  top: 11px;
+  padding-left: 6px;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.week-label.flip {
+  padding: 0 6px 0 0;
+  transform: translateX(-100%);
+}
+
+.week-held {
+  top: 14px;
+  margin-left: -4px;
+}
+
+.week-out {
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--bad);
+  border-radius: 1px;
+}
+
+.week-after {
+  white-space: nowrap;
+}
+
+.acct-settings .section-head .chip {
+  font-size: 11px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.setting-name {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.setting-input {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.setting-input input,
+.signin input {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.setting-input input {
+  width: 84px;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 8px;
+}
+
+.setting-input input:focus,
+.signin input:focus {
+  outline: 2px solid color-mix(in oklab, var(--wt) 50%, transparent);
+  outline-offset: 0;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.changes {
+  margin: 10px 0 0;
+  padding: 10px 14px 10px 30px;
+  background: var(--sunk);
+  border-radius: var(--radius);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.acct-note {
+  margin: 28px 0 0;
+  max-width: 720px;
+}
+
+.acct-note code {
+  white-space: nowrap;
+}
+
+.signin {
+  width: min(460px, calc(100vw - 32px));
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 20px 50px -12px rgb(0 0 0 / 0.35);
+  font-size: 14px;
+}
+
+.signin[open] {
+  animation: signin-in 180ms var(--ease);
+}
+
+.signin::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+
+@keyframes signin-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+.signin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.signin h2 {
+  font-size: 16px;
+  margin: 0;
+  font-weight: 620;
+}
+
+.signin p {
+  margin: 6px 0 12px;
+  line-height: 1.5;
+}
+
+.signin .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.signin-steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.signin-steps p {
+  margin: 4px 0 10px;
+  font-size: 13px;
+}
+
+.button-link {
+  display: inline-block;
+  padding: 5px 11px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--bg);
+  text-decoration: none;
+}
+
+.code-row {
+  display: flex;
+  gap: 8px;
+}
+
+.code-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.signin-done {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.signin-done .dot {
+  margin-top: 12px;
+  width: 10px;
+  height: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signin[open] {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .acct-head {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .acct-head .lede {
+    margin-bottom: 14px;
+  }
+
+  .acct-head > button {
+    margin-bottom: 20px;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .acct-week .section-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .week {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 6px 12px 10px;
+  }
+
+  .week > span:empty,
+  .week-after {
+    display: none;
+  }
+
+  .week-who {
+    height: auto;
+    padding-top: 8px;
+    font-size: 12px;
+  }
+
+  .week-track {
+    border-top: 0;
+    height: 30px;
+  }
+
+  .week-track::before {
+    top: 4px;
+    bottom: 4px;
+  }
+
+  .week-band {
+    top: 12px;
+  }
+
+  .week-reset,
+  .week-label {
+    top: 8px;
+  }
+
+  .week-held {
+    top: 11px;
+  }
+}
