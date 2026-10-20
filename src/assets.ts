@@ -44,7 +44,7 @@ export async function webAssets(dir: string, production: boolean) {
 
   return (req: Request) => {
     const path = new URL(req.url).pathname;
-    const page = req.headers.get("accept")?.includes("text/html");
+    const page = !/\.\w+$/.test(path) || req.headers.get("accept")?.includes("text/html");
     const asset = assets.get(path) ?? (page ? assets.get("/index.html") : undefined);
 
     if (!asset) return new Response("not found", { status: 404 });
