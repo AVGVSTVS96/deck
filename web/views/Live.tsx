@@ -263,7 +263,7 @@ function SessionTable({ sessions, name }: { sessions: LiveSession[]; name: (id: 
             <td className="mono muted clip folder" title={s.cwd}>
               {s.cwd.replace(/^\/(home|Users)\/[^/]+/, "~")}
             </td>
-            <td className="n muted">{s.since > 0 ? relativeTime(s.since) : "–"}</td>
+            <td className="n muted">{relativeTime(s.since)}</td>
           </tr>
         ))}
       </tbody>

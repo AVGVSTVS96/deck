@@ -522,7 +522,7 @@ function Ranking({
             <th className="n idx">#</th>
             <th>Name</th>
             <th className="share">Share · activity</th>
-            <th className="accts">Points from</th>
+            <th className="accts">Accounts</th>
             {MEASURES.map(([k, , , , , label]) => (
               <th key={k} className="n" aria-sort={k === key ? "descending" : undefined}>
                 <button onClick={() => setParams({ measure: k })}>
