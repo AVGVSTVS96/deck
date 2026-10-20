@@ -66,12 +66,16 @@ export type PoolAccount = {
   held: number;
   idle: number;
   room: { left: number; sessions: number; each: number | null; minimum: number } | null;
+  pace: number;
+  seats: Seat[];
   session: Window | null;
   week: Window | null;
   sampledAt: number | null;
   stale: boolean;
   reasons: string[];
 };
+
+export type Seat = { session: string; name: string | null; host: string; working: boolean };
 
 export type MoveCause = "limit" | "over" | "early" | "restart";
 
@@ -82,6 +86,13 @@ export type Start = { at: string; account: string };
 export type Host = { host: string; seenAt: number | null; seats: number };
 
 export type Policy = { sessionCutoff: number; weeklyCutoff: number; agentsPerAccount: number };
+
+export type PolicyCheck = {
+  next: string | null;
+  order: { label: string; standing: PoolAccount["standing"] }[];
+  revision: string;
+  saved: boolean;
+};
 
 export type Pool = {
   at: string;

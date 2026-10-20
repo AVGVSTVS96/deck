@@ -3,7 +3,7 @@ import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Config } from "./config";
-import type { AgentUsage, Agents, AppThreads, Host, Move, MoveCause, Policy, PoolAccount, Start, Window } from "./types";
+import type { AgentUsage, Agents, AppThreads, Host, Move, MoveCause, Policy, PolicyCheck, PoolAccount, Start, Window } from "./types";
 
 type ThreadEntry = { name?: string; session?: string; cwd?: string };
 
@@ -21,6 +21,7 @@ type RoutingAccount = {
   headroom: { remainingPercentagePoints: number; divisor: number; score: number | null; minimum: number } | null;
   usageAgeMs: number | null;
   usageStale: boolean;
+  pacePressure: number;
   reasons: string[];
   session: PoolWindow;
   week: PoolWindow;
@@ -302,6 +303,15 @@ export async function agents(config: Config): Promise<Agents> {
         each: account.headroom.score,
         minimum: account.headroom.minimum,
       },
+      pace: account.pacePressure,
+      seats: bindings
+        .filter((b) => b.accountId === account.id)
+        .map((b) => ({
+          session: b.sessionId,
+          name: b.name ?? sessionNames.get(b.sessionId) ?? null,
+          host: b.host ?? "server",
+          working: !b.waiting,
+        })),
       session: toWindow(account.session),
       week: toWindow(account.week),
       sampledAt: account.session?.sampledAt ?? null,
@@ -378,5 +388,33 @@ export async function agentUsage(config: Config, range: string): Promise<AgentUs
       )
       .toSorted((a, b) => (b.tokens ?? 0) - (a.tokens ?? 0) || (b.api ?? 0) - (a.api ?? 0) || a.repo.localeCompare(b.repo)),
     coverage: status.coverage,
+  };
+}
+
+export async function checkPolicy(config: Config, operation: "preview" | "save", policy: Policy, revision: string): Promise<PolicyCheck> {
+  if (!config.tokenhub) throw new Error("No tokenhub is set in deck's config.");
+
+  const response = await fetch(`${config.tokenhub}/api/pool/routing`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: new URL(config.tokenhub).origin },
+    body: JSON.stringify({ operation, model: "opus", config: policy, expectedRevision: revision }),
+    signal: AbortSignal.timeout(20_000),
+  });
+
+  const result: (Routing & { saved: boolean }) | { error: { message: string } } = await response.json();
+
+  if ("error" in result) throw new Error(result.error.message);
+
+  const byId = new Map(result.accounts.map((account) => [account.id, account]));
+
+  return {
+    next: (result.selectedAccountId && byId.get(result.selectedAccountId)?.label) ?? null,
+    order: result.rankedAccountIds.flatMap((id) => {
+      const account = byId.get(id);
+
+      return account ? [{ label: account.label, standing: standing(account) }] : [];
+    }),
+    revision: result.revision,
+    saved: result.saved,
   };
 }
