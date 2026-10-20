@@ -45,6 +45,7 @@ export type Thread = {
   session: string | null;
   cwd: string | null;
   running: boolean;
+  working: boolean | null;
   account: string | null;
   link: string | null;
 };
@@ -60,16 +61,67 @@ export type PoolAccount = {
   needsReauth: boolean;
   eligible: boolean;
   selected: boolean;
+  rank: number | null;
+  standing: "open" | "tight" | "blocked";
   held: number;
+  idle: number;
+  room: { left: number; sessions: number; each: number | null; minimum: number } | null;
   session: Window | null;
   week: Window | null;
+  sampledAt: number | null;
+  stale: boolean;
   reasons: string[];
+};
+
+export type MoveCause = "limit" | "over" | "early" | "restart";
+
+export type Move = { at: string; session: string; name: string | null; from: string; to: string; cause: MoveCause };
+
+export type Start = { at: string; account: string };
+
+export type Host = { host: string; seenAt: number | null; seats: number };
+
+export type Policy = { sessionCutoff: number; weeklyCutoff: number; agentsPerAccount: number };
+
+export type Pool = {
+  at: string;
+  accounts: PoolAccount[];
+  policy: Policy;
+  revision: string;
+  notes: string[];
+  moves: Move[];
+  starts: Start[];
+  hosts: Host[];
 };
 
 export type Agents = {
   apps: AppThreads[];
-  pool: { accounts: PoolAccount[]; at: string } | null;
+  pool: Pool | null;
   tokenhub: string | null;
+};
+
+export type Surface = { name: string; tokens: number; api: number; plan: number; sessions: number };
+
+export type Workflow = {
+  repo: string;
+  url: string;
+  name: string;
+  kind: string;
+  telemetry: string;
+  run: { result: string; url: string } | null;
+  missing: string | null;
+  runs: number;
+  tokens: number | null;
+  api: number | null;
+  models: string[];
+};
+
+export type AgentUsage = {
+  at: string;
+  surfaces: Surface[];
+  blocked: { id: string; name: string; surface: string; since: string }[];
+  github: Workflow[];
+  coverage: { name: string; status: string; detail: string }[];
 };
 
 export type Plugin = {
