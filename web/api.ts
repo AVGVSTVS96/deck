@@ -1,6 +1,6 @@
 import { QueryClient, useQuery } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
-import type { Account, LiveSession, LiveValue, Pool, ServerEvent } from "../src/contract";
+import type { Account, LiveSession, LiveState, LiveValue, Pool, ServerEvent } from "../src/contract";
 
 export class ApiError extends Error {}
 
@@ -153,6 +153,24 @@ export function useLiveList<P extends "s:" | "a:" | "app:">(prefix: P): [string,
 
   // SAFETY: as in useLive, the prefix decides the shape.
   return list as [string, LiveOf<`${P}x`>][];
+}
+
+/** Which session state a row or list leads with when it holds several. */
+export const LIVE_ORDER = { blocked: 0, working: 1, idle: 2 } as const satisfies Record<LiveState, number>;
+
+/** The pool's accounts in tokenhub's order, and one name for any account id. */
+export function useAccounts() {
+  const pool = useLive("pool");
+  const order = pool?.order ?? [];
+  const rank = (id: string) => order.indexOf(id) + 1 || order.length + 1;
+
+  const accounts = useLiveList("a:")
+    .map(([, a]) => a)
+    .toSorted((a, b) => rank(a.id) - rank(b.id));
+
+  const name = (id: string | null) => (id && id !== "none" ? (accounts.find((a) => a.id === id)?.label ?? id) : "No account");
+
+  return { accounts, pool, name };
 }
 
 export const useConnected = () => useSyncExternalStore(subscribe, () => connected);

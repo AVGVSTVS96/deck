@@ -1,20 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Account, AccountsView, Connection, Policy, PolicyResult, Pool, UsageView } from "../../src/contract";
-import { api, send, useApi, useLive, useLiveList } from "../api";
+import { api, send, useAccounts, useApi } from "../api";
 import { Steps } from "../chart";
-import { Busy, Empty, Meter, STANDING, dayOf, fmt, toast, useAction, useNow, when } from "../ui";
+import { Busy, Empty, Meter, STANDING, fmt, toast, useAction, useNow, when } from "../ui";
 
 const WEEK = 7 * 86_400_000;
 const SOON = 3 * 86_400_000;
 
 export default function Accounts() {
-  const accounts = useLiveList("a:").map(([, a]) => a);
-  const pool = useLive("pool");
+  const { accounts: ranked, pool } = useAccounts();
   const view = useApi<AccountsView>("/accounts", "accounts");
   const week = useApi<UsageView>("/usage?range=7d&by=agent&measure=week&limit=200", "usage");
   const [signIn, setSignIn] = useState<string | null>(null);
-  const order = pool?.order ?? [];
-  const ranked = accounts.toSorted((a, b) => (order.indexOf(a.id) + 1 || 99) - (order.indexOf(b.id) + 1 || 99));
 
   return (
     <div className="page accounts">
@@ -73,7 +70,7 @@ function AccountCard({
           <h2 id={`acct-${a.id}`}>{a.label}</h2>
           <p className="muted small">
             {a.plan}
-            {a.since && ` · in the pool since ${dayOf(a.since)}`}
+            {a.since && ` · subscribed since ${new Date(a.since).toLocaleDateString("en", { dateStyle: "medium" })}`}
           </p>
         </div>
         <span className="spacer" />
@@ -294,8 +291,7 @@ function PolicyEditor({ pool }: { pool: Pool }) {
 }
 
 function PolicyChange({ now, then }: { now: Pool; then: Pool }) {
-  const accounts = useLiveList("a:");
-  const name = (id: string | null) => (id ? (accounts.find(([key]) => key === id)?.[1].label ?? id) : "no account");
+  const { name } = useAccounts();
   const sameOrder = now.order.join() === then.order.join();
 
   return (
