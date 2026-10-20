@@ -13,6 +13,8 @@ export type UsageQuery = {
   where: Partial<Record<Dimension, string[]>>;
   search: string;
   limit: number;
+  /** Only rows under this agent row key, so a row drills into its sessions. */
+  within: string | null;
 };
 
 export type Amount = {
@@ -106,6 +108,7 @@ export type Account = {
   working: number;
   idle: number;
   heldResets: { kind: string; left: number; expiresAt: number | null }[];
+  atLimit: { available: boolean; nextAt: number | null } | null;
 };
 
 export type Policy = { sessionCutoff: number; weeklyCutoff: number; agentsPerAccount: number };
@@ -120,6 +123,13 @@ export type Pool = {
 };
 
 export type PolicyResult = { pool: Pool; saved: boolean; conflict: boolean };
+
+export type Connection = {
+  id: string;
+  email: string;
+  status: "starting" | "authorize" | "finishing" | "connected" | "failed";
+  url: string | null;
+};
 
 export type MoveCause = "limit" | "over" | "early" | "restart" | "start";
 
