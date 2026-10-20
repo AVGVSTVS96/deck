@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
-import type { DeckEvent } from "../src/events";
-import type { Agents } from "../src/types";
+import type { ServerEvent } from "../src/contract";
 
 export class ApiError extends Error {}
 
@@ -20,7 +19,23 @@ export const send = <T>(path: string, method: string, body?: Body) =>
 
 export const putText = (path: string, text: string) => api<{ ok: true }>(path, { method: "PUT", body: text });
 
+export type DeckEvent = { type: "repo"; repo: string } | { type: "ws"; id: string } | { type: "plugins" | "executor" | "drafts" };
+
 type Heard = DeckEvent | { type: "resync" };
+
+function heard(event: ServerEvent): DeckEvent[] {
+  if (event.type !== "stale") return [];
+
+  return event.tags.flatMap((tag): DeckEvent[] => {
+    const [kind, id = ""] = tag.split(":");
+
+    if (kind === "repo") return [{ type: "repo", repo: id }];
+
+    if (kind === "ws") return [{ type: "ws", id }];
+
+    return kind === "plugins" || kind === "executor" || kind === "drafts" ? [{ type: kind }] : [];
+  });
+}
 
 const listeners = new Set<(event: Heard) => void>();
 let source: EventSource | null = null;
@@ -38,7 +53,7 @@ function connect() {
 
     opened = true;
   });
-  source.addEventListener("message", (message) => tell(JSON.parse(message.data)));
+  source.addEventListener("message", (message) => heard(JSON.parse(message.data)).forEach(tell));
 }
 
 export function useDeckEvent(listener: (event: Heard) => void) {
@@ -110,13 +125,6 @@ export function useLoad<T>(
 
   return { data: current ? state.data : null, error: current ? state.error : null, reload };
 }
-
-export const useAgents = () =>
-  useLoad<Agents>(
-    "/agents",
-    (e) => e.type === "agents",
-    (e) => (e.type === "agents" ? e.data : undefined),
-  );
 
 const routeListeners = new Set<() => void>();
 
