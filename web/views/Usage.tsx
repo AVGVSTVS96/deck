@@ -116,10 +116,12 @@ export default function Usage() {
   const usage = useApi<UsageView>(path, "usage");
   const view = useKept(usage.data);
   const m = MEASURES.find(([key]) => key === measure)!;
+  const onPage = view?.rows.find((r) => r.key === selected) ?? null;
+  const offPage = useApi<UsageView>(selected && view && !onPage ? usagePath(state, { within: selected, limit: "1" }) : null, "usage");
 
   if (!view) return usage.error ? <Empty>{usage.error}</Empty> : <Empty>Reading usage…</Empty>;
 
-  const chosen = view.rows.find((r) => r.key === selected) ?? null;
+  const chosen = onPage ?? offPage.data?.rows.find((r) => r.key === selected) ?? null;
 
   return (
     <div className={usage.fetching && !usage.data ? "page usage fade dim" : "page usage fade"}>
