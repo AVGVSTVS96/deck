@@ -1,16 +1,177 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { Account, Accounts as Pool, Connection, HeldReset, Quota, Settings } from "../../src/accounts";
-import { api, relativeTime, send, useLoad } from "../api";
-import { Busy, Empty, toast, useAction } from "../ui";
+import type { Account, AccountsView, Connection, Policy, PolicyResult, Pool, UsageView } from "../../src/contract";
+import { api, send, useAccounts, useApi } from "../api";
+import { Steps } from "../chart";
+import { Busy, Empty, Meter, STANDING, fmt, toast, useAction, useNow, when } from "../ui";
 
-const HOUR = 3_600_000;
-const DAY = 24 * HOUR;
-const FIVE_HOURS = 5 * HOUR;
-const WEEK = 7 * DAY;
+const WEEK = 7 * 86_400_000;
+const SOON = 3 * 86_400_000;
 
-const RESET_NAMES: Record<HeldReset["kind"], string> = { session: "five-hour", weekly: "weekly", fable: "Fable", full: "full" };
+export default function Accounts() {
+  const { accounts: ranked, pool } = useAccounts();
+  const view = useApi<AccountsView>("/accounts", "accounts");
+  const week = useApi<UsageView>("/usage?range=7d&by=agent&measure=week&limit=200", "usage");
+  const [signIn, setSignIn] = useState<string | null>(null);
 
-const FIELDS: { key: keyof Settings; label: string; unit: string; max: number; about: string }[] = [
+  return (
+    <div className="page accounts">
+      <header className="head">
+        <div>
+          <h1>Accounts</h1>
+          <p className="lede">{pool?.decision ?? "Waiting for tokenhub's pool…"}</p>
+        </div>
+        <button className="primary" onClick={() => setSignIn("")}>
+          Add account
+        </button>
+      </header>
+
+      {!ranked.length && <Empty>No accounts in the pool yet.</Empty>}
+      <div className="cards">
+        {ranked.map((a) => (
+          <AccountCard key={a.id} account={a} pool={pool} view={view.data} week={week.data} onSignIn={() => setSignIn(a.label)} />
+        ))}
+      </div>
+
+      {pool && <PolicyEditor pool={pool} />}
+      {signIn !== null && <SignIn email={signIn} onClose={() => setSignIn(null)} />}
+    </div>
+  );
+}
+
+function AccountCard({
+  account: a,
+  pool,
+  view,
+  week,
+  onSignIn,
+}: {
+  account: Account;
+  pool: Pool | undefined;
+  view: AccountsView | null;
+  week: UsageView | null;
+  onSignIn: () => void;
+}) {
+  const now = useNow();
+  const history = view?.history.filter((h) => h.account === a.id) ?? [];
+
+  const top = (week?.rows ?? [])
+    .map((r) => ({ row: r, points: r.byAccount.find((b) => b.account === a.id)?.week ?? 0 }))
+    .filter((t) => t.points > 0)
+    .toSorted((x, y) => y.points - x.points)
+    .slice(0, 5);
+
+  const expiring = a.signInUntil !== null && a.signInUntil - now < SOON;
+
+  return (
+    <section className="section account" aria-labelledby={`acct-${a.id}`}>
+      <div className="section-head">
+        {a.rank !== null && <span className="rank mono">#{a.rank}</span>}
+        <div className="account-name">
+          <h2 id={`acct-${a.id}`}>{a.label}</h2>
+          <p className="muted small">
+            {a.plan}
+            {a.since && ` · subscribed since ${new Date(a.since).toLocaleDateString("en", { dateStyle: "medium" })}`}
+          </p>
+        </div>
+        <span className="spacer" />
+        <span className={`chip standing ${a.standing}`}>{STANDING[a.standing]}</span>
+      </div>
+      <div className="pad account-body">
+        <div className="limit-meters">
+          <Meter label="5 hours" window={a.fiveHour} />
+          <Meter label="Week" window={a.week} />
+        </div>
+
+        <dl className="facts">
+          <div>
+            <dt>Seats</dt>
+            <dd>
+              {a.working} working · {a.idle} idle
+            </dd>
+          </div>
+          <div>
+            <dt>Sign-in</dt>
+            <dd className={a.standing === "signed-out" || expiring ? "warn" : undefined}>
+              {a.standing === "signed-out" ? "signed out" : a.signInUntil ? `good until ${when(a.signInUntil)}` : "no expiry known"}
+              {(a.standing === "signed-out" || expiring) && (
+                <button className="small" onClick={onSignIn}>
+                  Sign in again
+                </button>
+              )}
+            </dd>
+          </div>
+          {a.heldResets.map((h) => (
+            <div key={h.kind}>
+              <dt>Held reset</dt>
+              <dd>
+                {h.left} {h.kind} {h.left === 1 ? "reset" : "resets"}
+                {h.expiresAt && `, use by ${when(h.expiresAt)}`}
+              </dd>
+            </div>
+          ))}
+          {a.atLimit?.available && (
+            <div>
+              <dt>Reset offer</dt>
+              <dd className="warn">Claude offers a limit reset now</dd>
+            </div>
+          )}
+        </dl>
+        {a.reasons.length > 0 && (
+          <ul className="reasons small">
+            {a.reasons.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        )}
+
+        {history.length > 0 && (
+          <Steps
+            caption={`${a.label}: limit use over the last 7 days`}
+            from={now - WEEK}
+            to={now}
+            cutoffs={
+              pool
+                ? [
+                    { label: "week", value: pool.policy.weeklyCutoff },
+                    { label: "5h", value: pool.policy.sessionCutoff },
+                  ]
+                : []
+            }
+            lines={history.map((h) => ({
+              key: h.kind,
+              label: h.kind === "week" ? "Week" : "5 hours",
+              color: h.kind === "week" ? "ink" : "muted",
+              dashed: h.kind === "fiveHour",
+              points: h.points,
+            }))}
+          />
+        )}
+
+        <div className="drill">
+          <h3 className="small muted">Top agents this week</h3>
+          {top.length ? (
+            <ul className="sessions">
+              {top.map(({ row, points }) => (
+                <li key={row.key}>
+                  <span className="who clip">
+                    <i className="swatch" data-c={row.color} />
+                    {row.label}
+                    <span className="muted small">{row.detail}</span>
+                  </span>
+                  <span className="num">{fmt.pts(points)} pts</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted small">{week ? "No week points tied to agents yet." : "Reading usage…"}</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const FIELDS: { key: keyof Policy; label: string; unit: string; max: number; about: string }[] = [
   {
     key: "sessionCutoff",
     label: "Five-hour cutoff",
@@ -28,497 +189,139 @@ const FIELDS: { key: keyof Settings; label: string; unit: string; max: number; a
   },
 ];
 
-const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString();
-
-function when(at: number, now: number) {
-  if (sameDay(at, now)) return new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-
-  if (Math.abs(at - now) < 6 * DAY) return new Date(at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
-
-  return day(at);
-}
-
-const day = (at: number) => new Date(at).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-
-const tierName = (tier: string) => tier.replace(/^\w/, (c) => c.toUpperCase());
-
-const heldName = (reset: HeldReset) => `${reset.left} ${RESET_NAMES[reset.kind]} reset${reset.left === 1 ? "" : "s"}`;
-
-export function Accounts() {
-  const pool = useLoad<Pool>("/accounts");
-  const [draft, setDraft] = useState<Settings | null>(null);
-  const [adding, setAdding] = useState<string | null>(null);
-  const { reload } = pool;
-
-  useEffect(() => {
-    const timer = setInterval(() => void reload(), 30_000);
-
-    return () => clearInterval(timer);
-  }, [reload]);
-
-  if (!pool.data) return <Empty>{pool.error ?? "Reading the account pool…"}</Empty>;
-  const { accounts, settings } = pool.data;
-  const cutoffs = draft ?? settings;
-  const now = Date.parse(pool.data.at);
-  const signedOut = accounts.filter((a) => a.needsReauth).length;
-  const held = accounts.flatMap((a) => a.held);
-  const heldCount = held.reduce((sum, r) => sum + r.left, 0);
-  const soonest = held.flatMap((r) => (r.useBy === null ? [] : [r.useBy])).toSorted((a, b) => a - b)[0];
-
-  return (
-    <div className="page accounts-page">
-      <header className="page-head acct-head">
-        <div>
-          <h1>Accounts</h1>
-          <p className="lede">
-            <b>{accounts.length}</b> Claude accounts share every session on the server and the Mac
-            {signedOut ? (
-              <>
-                ; <b className="bad-text">{signedOut}</b> need signing in again
-              </>
-            ) : (
-              ", all signed in"
-            )}
-            .
-            {heldCount > 0 && (
-              <>
-                {" "}
-                <b>{heldCount}</b> limit reset{heldCount === 1 ? "" : "s"} held
-                {soonest ? `, the first to expire on ${day(soonest)}` : ""}.
-              </>
-            )}
-          </p>
-        </div>
-        <button className="primary" onClick={() => setAdding("")}>
-          Add account
-        </button>
-      </header>
-
-      {pool.error && <p className="acct-alert">{pool.error} Showing the last reading.</p>}
-
-      <p className="acct-key acct-legend muted small">
-        <span>
-          <i className="key-fill" /> used
-        </span>
-        <span>
-          <i className="key-tick" /> cutoff, where new sessions move on
-        </span>
-        <span>
-          <i className="key-time" /> time gone in the window
-        </span>
-      </p>
-      <div className="acct-grid">
-        {accounts.map((a, i) => (
-          <AccountCard key={a.id} account={a} hue={i} now={now} cutoffs={cutoffs} onSignIn={() => setAdding(a.email)} />
-        ))}
-      </div>
-
-      <Week accounts={accounts} now={now} />
-
-      <PoolSettings pool={pool.data} draft={draft} setDraft={setDraft} reload={reload} />
-
-      <p className="muted small acct-note">
-        Held resets are read from Claude's usage report and only shown here. The pool never spends one; you do, with{" "}
-        <code>/limit-reset</code>. Logins stay with tokenhub on the server; deck never sees them.
-      </p>
-
-      {adding !== null && (
-        <SignIn
-          email={adding}
-          onClose={(joined) => {
-            setAdding(null);
-
-            if (joined) void reload();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function AccountCard({
-  account: a,
-  hue,
-  now,
-  cutoffs,
-  onSignIn,
-}: {
-  account: Account;
-  hue: number;
-  now: number;
-  cutoffs: Settings;
-  onSignIn: () => void;
-}) {
-  const lastsDays = a.signInUntil === null ? null : (a.signInUntil - now) / DAY;
-
-  return (
-    <article className={a.needsReauth ? "acct-card out" : "acct-card"} data-hue={hue}>
-      <div className="pool-title">
-        <span className="swatch" />
-        <span className="who" title={a.email}>
-          {a.email}
-        </span>
-        {a.needsReauth ? (
-          <span className="chip bad">signed out</span>
-        ) : !a.eligible ? (
-          <span className="chip warn" title={a.reasons.join(" ")}>
-            held back
-          </span>
-        ) : (
-          a.next && <span className="chip live">next session</span>
-        )}
-      </div>
-      <div className="acct-plan">
-        {a.tier ? tierName(a.tier) : "Plan unknown"}
-        {a.since !== null && (
-          <span className="muted"> · since {new Date(a.since).toLocaleDateString([], { month: "short", year: "numeric" })}</span>
-        )}
-      </div>
-
-      {a.needsReauth ? (
-        <p className="acct-out">Its sign-in ended, so the pool skips it. Sign in again to put it back.</p>
-      ) : (
-        <>
-          <Window label="5 hours" quota={a.fiveHour} cutoff={cutoffs.sessionCutoff} length={FIVE_HOURS} now={now} />
-          <Window label="Week" quota={a.week} cutoff={cutoffs.weeklyCutoff} length={WEEK} now={now} />
-        </>
-      )}
-
-      <dl className="facts acct-facts">
-        <dt>Agents</dt>
-        <dd>
-          <b className="num">{a.working}</b> working · <span className="num">{a.idle}</span> idle
-        </dd>
-        <dt>Signed in</dt>
-        <dd className={lastsDays !== null && lastsDays < 7 ? "warn" : undefined}>
-          {a.signInUntil === null ? "until unknown" : `until ${day(a.signInUntil)}`}
-          {a.signInUntil !== null && <span className="muted"> · {relativeTime(a.signInUntil)}</span>}
-        </dd>
-        <dt>Resets held</dt>
-        <dd>
-          {a.held.length === 0 && !a.limitReset && <span className="muted">none</span>}
-          {a.held.map((r) => (
-            <div key={`${r.kind}-${r.useBy}`} className="held">
-              <span className="held-mark" />
-              {heldName(r)}
-              {r.useBy !== null && <span className={r.useBy - now < 2 * DAY ? "warn" : "muted"}> · use by {when(r.useBy, now)}</span>}
-              {r.paused && <span className="muted"> · paused</span>}
-            </div>
-          ))}
-          {a.limitReset && (
-            <div className="held">
-              {a.limitReset.available
-                ? "Session-limit reset ready (1 a week)"
-                : `Session-limit reset used${a.limitReset.nextAt ? `, next ${day(a.limitReset.nextAt)}` : ""}`}
-            </div>
-          )}
-        </dd>
-      </dl>
-
-      <div className="acct-foot">
-        <span className={a.stale ? "warn small" : "muted small"}>
-          {a.readAt === null ? "Limits not read yet" : `Limits read ${relativeTime(a.readAt)}`}
-        </span>
-        <button className={a.needsReauth ? "primary small" : "quiet small"} onClick={onSignIn}>
-          Sign in again
-        </button>
-      </div>
-    </article>
-  );
-}
-
-function Window({
-  label,
-  quota,
-  cutoff,
-  length,
-  now,
-}: {
-  label: string;
-  quota: Quota | null;
-  cutoff: number;
-  length: number;
-  now: number;
-}) {
-  if (!quota) {
-    return (
-      <div className="win">
-        <div className="meter-label">
-          <span>{label}</span>
-          <span className="muted">not reported</span>
-        </div>
-        <div className="meter-track" />
-      </div>
-    );
-  }
-
-  const lapsed = quota.resetsAt !== null && quota.resetsAt <= now;
-  const gone = quota.resetsAt === null || lapsed ? null : Math.min(100, Math.max(0, (1 - (quota.resetsAt - now) / length) * 100));
-  const tone = quota.used >= cutoff ? "hot" : "";
-
-  return (
-    <div
-      className={lapsed ? "win lapsed" : "win"}
-      title={`${label}: ${quota.used}% used, new sessions move on at ${cutoff}%${gone === null ? "" : `, ${Math.round(gone)}% of the window gone`}`}
-    >
-      <div className="meter-label">
-        <span>{label}</span>
-        <span className="num">{quota.used}%</span>
-      </div>
-      <div className="meter-track">
-        <div className={`meter-fill ${tone}`} style={{ width: `${Math.min(quota.used, 100)}%` }} />
-        <div className="meter-tick" style={{ left: `${cutoff}%` }} />
-        {gone !== null && <i className="win-time" style={{ left: `${gone}%` }} />}
-      </div>
-      <div className="win-foot">
-        {quota.resetsAt === null ? (
-          <span className="muted">starts with the next use</span>
-        ) : lapsed ? (
-          <span className="muted">reset at {when(quota.resetsAt, now)}, waiting for a new reading</span>
-        ) : (
-          <>
-            <span>resets {when(quota.resetsAt, now)}</span>
-            <span className="muted">{relativeTime(quota.resetsAt)}</span>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Week({ accounts, now }: { accounts: Account[]; now: number }) {
-  const end = now + WEEK;
-  const x = (at: number) => `${((at - now) / WEEK) * 100}%`;
-  const inside = (at: number | null): at is number => at !== null && at > now && at <= end;
-  const midnights = Array.from({ length: 8 }, (_, i) => new Date(now).setHours(24 * (i + 1), 0, 0, 0)).filter((at) => at < end);
-  const days = [now, ...midnights].map((from, i, all) => ({ from, to: all[i + 1] ?? end }));
-
-  return (
-    <section className="acct-week">
-      <div className="section-head">
-        <h2>The week ahead</h2>
-        <span className="acct-legend muted small">
-          <span>
-            <i className="lg-week" /> week window, ends when its limit resets
-          </span>
-          <span>
-            <i className="lg-held" /> held reset expires
-          </span>
-          <span>
-            <i className="lg-out" /> sign-in ends
-          </span>
-        </span>
-      </div>
-      <div className="week">
-        <span />
-        <div className="week-axis">
-          {days.map((d) =>
-            d.to - d.from > DAY * 0.45 ? (
-              <span key={d.from} style={{ left: x(d.from), width: x(now + d.to - d.from) }}>
-                {sameDay(d.from, now)
-                  ? "today"
-                  : `${new Date(d.from).toLocaleDateString([], { weekday: "short" })} ${new Date(d.from).getDate()}`}
-              </span>
-            ) : null,
-          )}
-        </div>
-        <span />
-        {accounts.map((a, i) => {
-          const reset = a.week?.resetsAt ?? null;
-
-          return (
-            <div key={a.id} className="week-row" data-hue={i}>
-              <span className="week-who" title={a.email}>
-                <span className="swatch" />
-                <span>{a.email}</span>
-              </span>
-              <div className="week-track">
-                {midnights.map((at) => (
-                  <i key={at} className="week-day" style={{ left: x(at) }} />
-                ))}
-                {!a.needsReauth && inside(reset) && (
-                  <>
-                    <i className="week-band" style={{ width: x(reset) }} />
-                    <i
-                      className="week-reset"
-                      style={{ left: x(reset) }}
-                      title={`Weekly limit resets ${when(reset, now)} (${a.week?.used}% used now)`}
-                    />
-                    <span className={reset - now > WEEK * 0.85 ? "week-label flip" : "week-label"} style={{ left: x(reset) }}>
-                      {a.week?.used}% → 0
-                    </span>
-                  </>
-                )}
-                {a.held.flatMap((r) =>
-                  inside(r.useBy) ? (
-                    <i
-                      key={`${r.kind}-${r.useBy}`}
-                      className="week-held"
-                      style={{ left: x(r.useBy) }}
-                      title={`${heldName(r)}, use by ${when(r.useBy, now)}`}
-                    />
-                  ) : (
-                    []
-                  ),
-                )}
-                {inside(a.signInUntil) && (
-                  <i className="week-out" style={{ left: x(a.signInUntil) }} title={`Sign-in ends ${when(a.signInUntil, now)}`} />
-                )}
-              </div>
-              <span className="week-after muted small">
-                {a.needsReauth
-                  ? "signed out"
-                  : a.signInUntil && !inside(a.signInUntil)
-                    ? `signed in to ${day(a.signInUntil).replace(/^\w+, /, "")}`
-                    : ""}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function PoolSettings({
-  pool,
-  draft,
-  setDraft,
-  reload,
-}: {
-  pool: Pool;
-  draft: Settings | null;
-  setDraft: (settings: Settings | null) => void;
-  reload: () => Promise<void>;
-}) {
-  const [preview, setPreview] = useState<Pool | null>(null);
+/** The one policy editor: change, preview what tokenhub would do, then save against the revision you previewed. */
+function PolicyEditor({ pool }: { pool: Pool }) {
+  const [draft, setDraft] = useState<Policy | null>(null);
+  const [preview, setPreview] = useState<PolicyResult | null>(null);
   const { busy, run } = useAction();
-  const values = draft ?? pool.settings;
-  const dirty = draft !== null && FIELDS.some((f) => draft[f.key] !== pool.settings[f.key]);
+  const values = draft ?? pool.policy;
+  const dirty = draft !== null && FIELDS.some((f) => draft[f.key] !== pool.policy[f.key]);
   const valid = FIELDS.every((f) => Number.isInteger(values[f.key]) && values[f.key] >= 1 && values[f.key] <= f.max);
-  const previewed = preview !== null && FIELDS.every((f) => preview.settings[f.key] === values[f.key]);
+  const previewed = preview !== null && FIELDS.every((f) => preview.pool.policy[f.key] === values[f.key]);
 
   const hint = !dirty
     ? "Change a value to preview it."
     : !valid
       ? "Cutoffs go from 1 to 100%, agents from 1 to 500."
       : previewed
-        ? "This is what saving would change right now:"
+        ? "Saving would do this right now:"
         : "Preview to see what changes, then save.";
 
-  const change = (key: keyof Settings, value: number) => {
-    setPreview(null);
-    setDraft({ ...values, [key]: value });
-  };
+  const submit = (save: boolean) =>
+    run(save ? "save" : "preview", async () => {
+      const revision = save && preview ? preview.pool.revision : pool.revision;
+      const result = await send<PolicyResult>("/accounts/policy", "POST", { policy: values, revision, save });
 
-  const submit = (operation: "preview" | "save") =>
-    run(operation, async () => {
-      const revision = operation === "save" && preview ? preview.revision : pool.revision;
+      if (result.conflict) {
+        setPreview(null);
+        toast("The policy changed somewhere else since you previewed. Check the new values, then preview again.", "bad");
 
-      const result = await api<Pool>("/accounts/settings", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ operation, settings: values, revision }),
-      });
+        return;
+      }
 
-      if (operation === "preview") return setPreview(result);
+      if (!save) return setPreview(result);
       setPreview(null);
       setDraft(null);
-      toast("Pool settings saved. New sessions use them; running ones keep their account.");
-      await reload();
+      toast("Policy saved. New sessions use it; running ones keep their account.");
     });
 
   return (
-    <section className="acct-settings">
+    <section className="section policy" aria-labelledby="policy-title">
       <div className="section-head">
-        <h2>Pool settings</h2>
-        <span className={dirty ? "chip warn" : "muted small"}>{dirty ? "not saved" : "in effect"}</span>
+        <h2 id="policy-title">Routing policy</h2>
+        <span className={dirty ? "chip warn" : "sub"}>{dirty ? "not saved" : "in effect"}</span>
       </div>
-      <div className="settings-grid">
-        {FIELDS.map((f) => (
-          <div key={f.key} className="setting">
-            <label className="setting-name" htmlFor={`setting-${f.key}`}>
-              {f.label}
+      <div className="pad">
+        <div className="policy-fields">
+          {FIELDS.map((f) => (
+            <label key={f.key} className="field">
+              <span>{f.label}</span>
+              <span className="policy-input">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={f.max}
+                  step={1}
+                  value={Number.isNaN(values[f.key]) ? "" : values[f.key]}
+                  onChange={(e) => {
+                    setPreview(null);
+                    setDraft({ ...values, [f.key]: e.currentTarget.valueAsNumber });
+                  }}
+                />
+                <span className="muted">{f.unit}</span>
+              </span>
+              <span className="muted small">{f.about}</span>
             </label>
-            <span className="setting-input">
-              <input
-                id={`setting-${f.key}`}
-                aria-describedby={`setting-${f.key}-about`}
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={f.max}
-                step={1}
-                value={Number.isNaN(values[f.key]) ? "" : values[f.key]}
-                onChange={(e) => change(f.key, e.currentTarget.valueAsNumber)}
-              />
-              <span className="muted">{f.unit}</span>
-            </span>
-            <span id={`setting-${f.key}-about`} className="muted small">
-              {f.about}
-            </span>
-          </div>
-        ))}
+          ))}
+        </div>
+        <div className="policy-actions">
+          <Busy on={busy === "preview"} disabled={!dirty || !valid || busy !== null} onClick={() => void submit(false)}>
+            Preview
+          </Busy>
+          <Busy on={busy === "save"} className="primary" disabled={!dirty || !previewed || busy !== null} onClick={() => void submit(true)}>
+            Save
+          </Busy>
+          <button
+            className="quiet"
+            disabled={!dirty || busy !== null}
+            onClick={() => {
+              setPreview(null);
+              setDraft(null);
+            }}
+          >
+            Discard
+          </button>
+          <span className="muted small">{hint}</span>
+        </div>
+        {previewed && <PolicyChange now={pool} then={preview.pool} />}
+        {pool.notes.length > 0 && (
+          <details className="notes">
+            <summary>How the pool picks an account</summary>
+            <ul>
+              {pool.notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          </details>
+        )}
       </div>
-      <div className="settings-actions">
-        <Busy on={busy === "preview"} disabled={!dirty || !valid || busy !== null} onClick={() => void submit("preview")}>
-          Preview
-        </Busy>
-        <Busy on={busy === "save"} className="primary" disabled={!dirty || !previewed || busy !== null} onClick={() => void submit("save")}>
-          Save
-        </Busy>
-        <button
-          className="quiet"
-          disabled={!dirty || busy !== null}
-          onClick={() => {
-            setPreview(null);
-            setDraft(null);
-          }}
-        >
-          Discard
-        </button>
-        <span className="muted small">{hint}</span>
-      </div>
-      {previewed && <Changes now={pool.accounts} then={preview.accounts} />}
     </section>
   );
 }
 
-function Changes({ now, then }: { now: Account[]; then: Account[] }) {
-  const before = new Map(now.map((a) => [a.id, a]));
-  const flips = then.filter((a) => before.get(a.id)?.eligible !== a.eligible);
-  const next = then.find((a) => a.next);
-  const nextBefore = now.find((a) => a.next);
+function PolicyChange({ now, then }: { now: Pool; then: Pool }) {
+  const { name } = useAccounts();
+  const sameOrder = now.order.join() === then.order.join();
 
   return (
     <ul className="changes">
-      {flips.map((a) => (
-        <li key={a.id}>
-          <b>{a.email}</b> {a.eligible ? "would take new sessions again." : `would be held back: ${a.reasons.join(" ").toLowerCase()}`}
-        </li>
-      ))}
       <li>
-        {next?.id === nextBefore?.id ? (
+        {then.next === now.next ? (
           <>
-            The next new session still goes to <b>{next?.email ?? "no account"}</b>.
+            The next new session still goes to <b>{name(then.next)}</b>.
           </>
         ) : (
           <>
-            The next new session would go to <b>{next?.email ?? "no account"}</b> instead of {nextBefore?.email ?? "none"}.
+            The next new session would go to <b>{name(then.next)}</b> instead of {name(now.next)}.
           </>
         )}
       </li>
+      {!sameOrder && <li>Order after it: {then.order.map(name).join(", ")}.</li>}
+      {then.decision !== now.decision && <li className="muted">{then.decision}</li>}
     </ul>
   );
 }
 
-function SignIn({ email: initial, onClose }: { email: string; onClose: (joined: boolean) => void }) {
+function SignIn({ email: initial, onClose }: { email: string; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [email, setEmail] = useState(initial);
   const [code, setCode] = useState("");
   const [connection, setConnection] = useState<Connection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [failures, setFailures] = useState(0);
+  const steps = useRef(0);
   const joined = connection?.status === "connected";
 
   useEffect(() => dialog.current?.showModal(), []);
@@ -526,19 +329,30 @@ function SignIn({ email: initial, onClose }: { email: string; onClose: (joined: 
   useEffect(() => {
     if (!connection || connection.status === "connected" || connection.status === "failed") return;
 
+    const asked = steps.current;
+
     const timer = setTimeout(
       () =>
-        api<Connection>(`/accounts/connect/${connection.id}`).then(setConnection, (e) =>
-          setError(e instanceof Error ? e.message : String(e)),
+        api<Connection>(`/accounts/connect/${connection.id}`).then(
+          (next) => {
+            if (steps.current !== asked) return;
+            setFailures(0);
+            setConnection(next);
+          },
+          (e) => {
+            setError(e instanceof Error ? e.message : String(e));
+            setFailures((n) => n + 1);
+          },
         ),
-      2000,
+      2000 * Math.min(failures + 1, 5),
     );
 
     return () => clearTimeout(timer);
-  }, [connection]);
+  }, [connection, failures]);
 
   const step = (action: () => Promise<Connection>) => async (e: FormEvent) => {
     e.preventDefault();
+    steps.current++;
     setBusy(true);
     setError(null);
 
@@ -552,18 +366,19 @@ function SignIn({ email: initial, onClose }: { email: string; onClose: (joined: 
   };
 
   return (
-    <dialog ref={dialog} className="signin" onClose={() => onClose(joined)} aria-labelledby="signin-title">
-      <div className="signin-head">
+    <dialog ref={dialog} className="signin" onClose={onClose} aria-labelledby="signin-title">
+      <div className="section-head flush">
         <h2 id="signin-title">{joined ? "Account added" : initial ? "Sign in again" : "Add a Claude account"}</h2>
+        <span className="spacer" />
         <button className="quiet small" aria-label="Close" onClick={() => dialog.current?.close()}>
           ✕
         </button>
       </div>
 
-      {error && <p className="acct-alert">{error}</p>}
+      {error && <p className="alert">{error}</p>}
 
       {!connection ? (
-        <form onSubmit={step(() => send<Connection>("/accounts/connect", "POST", { email }))}>
+        <form className="signin-step" onSubmit={step(() => send<Connection>("/accounts/connect", "POST", { email }))}>
           <p className="muted">You sign in once on Claude's own page. The login stays with tokenhub on the server and joins the pool.</p>
           <label className="field">
             <span>Account email</span>
@@ -574,8 +389,7 @@ function SignIn({ email: initial, onClose }: { email: string; onClose: (joined: 
           </Busy>
         </form>
       ) : joined ? (
-        <div className="signin-done">
-          <span className="dot live" />
+        <div className="signin-step">
           <p>
             Claude confirmed <b>{connection.email}</b>. Its limits show up here once tokenhub reads them, usually within a minute.
           </p>
@@ -584,7 +398,7 @@ function SignIn({ email: initial, onClose }: { email: string; onClose: (joined: 
           </button>
         </div>
       ) : connection.status === "failed" ? (
-        <div>
+        <div className="signin-step">
           <p>
             Claude didn't finish this sign-in. Start again, and choose <b>{connection.email}</b> on Claude's page.
           </p>
@@ -606,7 +420,7 @@ function SignIn({ email: initial, onClose }: { email: string; onClose: (joined: 
               Pick <b>{connection.email}</b> on Claude's page and approve the Claude Code login.
             </p>
             {connection.url ? (
-              <a className="button-link" href={connection.url} target="_blank" rel="noreferrer">
+              <a className="button" href={connection.url} target="_blank" rel="noreferrer">
                 Open Claude sign-in ↗
               </a>
             ) : (
@@ -620,6 +434,7 @@ function SignIn({ email: initial, onClose }: { email: string; onClose: (joined: 
               <input
                 required
                 autoComplete="off"
+                aria-label="Code from Claude"
                 placeholder="Code from Claude"
                 value={code}
                 disabled={connection.status !== "authorize"}

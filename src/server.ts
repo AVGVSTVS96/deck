@@ -1,49 +1,111 @@
-import { existsSync } from "node:fs";
+import { gzipSync } from "bun";
 import { readdir } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import type { BunRequest } from "bun";
-import app from "../web/index.html";
-import { Tokenhub } from "./accounts";
-import { agentUsage, agents, checkPolicy } from "./agents";
+import { compressed, webAssets } from "./assets";
 import { loadConfig } from "./config";
-import { Events } from "./events";
+import type { AccountsView } from "./contract";
 import { Executor } from "./executor";
 import { Git, GitError } from "./git";
+import { labelOf, names, whoOf } from "./identity";
+import { liveMap, processes, type Live } from "./live";
 import { plugins, setPlugin } from "./plugins";
+import { source, watch } from "./sources";
+import { Stream } from "./stream";
+import { tokenhub } from "./tokenhub";
+import { tracker } from "./tracker";
 import type { Draft } from "./types";
+import { parseQuery, usageView, withLive, type Labels } from "./usage";
 
 const config = await loadConfig();
+const production = process.env.NODE_ENV === "production";
 const repos = new Git(config);
-const events = new Events();
+const stream = new Stream();
 const executor = config.executor ? new Executor(config.executor) : null;
-const tokenhub = config.tokenhub ? new Tokenhub(config.tokenhub) : null;
+const hub = config.tokenhub ? tokenhub(config.tokenhub) : null;
+const usage = config.tracker ? tracker(config.tracker, config.timezone, () => stream.size > 0) : null;
+const threads = names(config.hex);
+const running = processes(config.claude, config.hex);
+const web = await webAssets(config.web, production);
+const executorOverview = executor ? source({ name: "executor", load: () => executor.overview() }) : null;
 
-async function watchAll() {
-  const workspaces = await Promise.all(config.repos.map((repo) => repos.workspaces(repo)));
+let live: Live = { sessions: new Map(), map: {} };
+
+function publish() {
+  live = liveMap({ processes: running.value, pool: hub?.pool.value, names: threads.value, tracked: usage?.latest() });
+  stream.publish(live.map);
+}
+
+let views = new Map<string, ReturnType<typeof usageView>>();
+let labelsKey = "";
+
+function usageChanged() {
+  views = new Map();
+  stream.stale("usage");
+}
+
+running.on(publish);
+
+threads.on(() => (publish(), usageChanged()));
+
+usage?.on(() => (publish(), usageChanged()));
+
+hub?.pool.on(() => {
+  publish();
+  const next = JSON.stringify(labels().accounts);
+
+  if (next === labelsKey) return;
+  labelsKey = next;
+  usageChanged();
+});
+
+hub?.logs.on(() => stream.stale("accounts"));
+
+function labels(): Labels {
+  return {
+    accounts: Object.fromEntries(hub?.pool.value?.accounts.map((a) => [a.id, a.label]) ?? []),
+    devices: Object.fromEntries(usage?.latest()?.devices.map((d) => [d.id, d.label]) ?? []),
+  };
+}
+
+const watching = new Map<string, () => void>();
+
+/** Watches every repo, workspace and settings file once, and lets go of workspaces that are gone, so one re-created at the same path gets a fresh watcher. */
+async function watchFiles() {
+  const wanted: [path: string, tag: string, recursive: boolean, only: RegExp][] = [
+    [config.claude, "plugins", false, /^settings\.json$/],
+    [join(config.claude, "plugins"), "plugins", false, /^installed_plugins\.json$/],
+  ];
+
+  if (config.drafts) wanted.push([config.drafts.dir, "drafts", false, /^[^.]/]);
 
   for (const repo of config.repos) {
-    events.watch(
+    wanted.push([
       join(repo.path, ".git"),
-      { type: "repo", repo: repo.id },
-      { recursive: true, only: /^(index|HEAD|refs\/(?!t3\/)|logs|COMMIT_EDITMSG|ORIG_HEAD)(?!.*\.lock$)/ },
-    );
+      `repo:${repo.id}`,
+      true,
+      /^(index|HEAD|refs\/(?!t3\/)|logs|COMMIT_EDITMSG|ORIG_HEAD)(?!.*\.lock$)/,
+    ]);
+
+    for (const ws of await repos.workspaces(repo)) if (ws.name) wanted.push([ws.path, `ws:${ws.id}`, true, /^(?!\.git(\/|$))/]);
   }
 
-  for (const ws of workspaces.flat()) {
-    if (ws.name) events.watch(ws.path, { type: "ws", id: ws.id }, { recursive: true, only: /^(?!\.git(\/|$))/ });
+  const paths = new Set(wanted.map(([path]) => path));
+
+  for (const [path, stop] of watching) {
+    if (paths.has(path)) continue;
+    stop();
+    watching.delete(path);
   }
 
-  const state = join(config.hex, "state");
-
-  for (const name of await readdir(state).catch(() => [])) {
-    if (existsSync(join(state, name, "threads.json")))
-      events.watch(join(state, name), { type: "agents" }, { only: /^(threads\.json|hub\.sock)$/ });
+  for (const [path, tag, recursive, only] of wanted) {
+    if (!watching.has(path))
+      watching.set(
+        path,
+        watch([{ path, recursive, only }], () => stream.stale(tag), 80),
+      );
   }
-
-  events.watch(join(config.claude, "sessions"), { type: "agents" }, { only: /^\d+\.json$/ });
-  events.watch(config.claude, { type: "plugins" }, { only: /^settings\.json$/ });
-  events.watch(join(config.claude, "plugins"), { type: "plugins" }, { only: /^installed_plugins\.json$/ });
 }
 
 const ownHosts = new Set([config.host, hostname(), "localhost", "127.0.0.1"].map((name) => `${name}:${config.port}`));
@@ -56,40 +118,16 @@ function trusted(req: Request) {
 }
 
 const forbidden = () => Response.json({ error: "forbidden" }, { status: 403 });
+const encoder = new TextEncoder();
 
-function cached<T>(build: () => Promise<T>, maxAge: number) {
-  let value: Promise<T> | null = null;
-  let at = 0;
+function reply<T>(req: Request, data: T, status = 200) {
+  const body = encoder.encode(JSON.stringify(data ?? { ok: true }));
+  const headers = { "content-type": "application/json", "cache-control": "no-store" };
 
-  const fresh = () => {
-    const next = build();
+  if (status !== 200) return new Response(body, { status, headers });
 
-    at = Date.now();
-    value = next;
-    next.catch(() => value === next && (value = null));
-
-    return next;
-  };
-
-  return { get: () => (value && Date.now() - at < maxAge ? value : fresh()), fresh };
+  return compressed(req, body, body.byteLength > 1024 ? gzipSync(body) : null, headers);
 }
-
-function sharing<T>(build: (req: BunRequest) => Promise<T>) {
-  const running = new Map<string, Promise<T>>();
-
-  return (req: BunRequest) => {
-    const key = `${events.generation} ${req.url}`;
-    const next = running.get(key) ?? build(req).finally(() => running.delete(key));
-
-    running.set(key, next);
-
-    return next;
-  };
-}
-
-const liveAgents = cached(() => agents(config), 5_000);
-
-events.pushAgents(liveAgents.get);
 
 const json =
   <T>(handler: (req: BunRequest) => Promise<T> | T) =>
@@ -97,28 +135,20 @@ const json =
     if (!trusted(req)) return forbidden();
 
     try {
-      return Response.json((await handler(req)) ?? { ok: true });
+      return reply(req, await handler(req));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-
-      return Response.json({ error: message }, { status: error instanceof GitError ? 409 : 500 });
+      return reply(req, { error: error instanceof Error ? error.message : String(error) }, error instanceof GitError ? 409 : 500);
     }
   };
 
 const param = (req: BunRequest, name: string) => req.params[name];
 const query = (req: BunRequest, name: string) => new URL(req.url).searchParams.get(name) ?? "";
 
-const needExecutor = () => {
-  if (!executor) throw new Error("Executor isn't set up in deck's config.");
+function need<T>(value: T | null, what: string): T {
+  if (!value) throw new Error(`${what} isn't set up in deck's config.`);
 
-  return executor;
-};
-
-const needTokenhub = () => {
-  if (!tokenhub) throw new Error("tokenhub isn't set up in deck's config.");
-
-  return tokenhub;
-};
+  return value;
+}
 
 async function drafts(): Promise<Draft[]> {
   if (!config.drafts) return [];
@@ -132,22 +162,110 @@ async function drafts(): Promise<Draft[]> {
   });
 }
 
-await watchAll();
+async function usageRoute(req: BunRequest) {
+  const q = parseQuery(new URL(req.url).searchParams);
+  const data = await need(usage, "token-tracker").get(q.range);
+
+  if (!data.value) throw new Error(data.error ?? "token-tracker hasn't answered yet.");
+
+  if (!threads.value) await threads.ready();
+
+  const key = JSON.stringify(q);
+  let view = views.get(key);
+
+  if (!view) {
+    if (views.size > 64) views.clear();
+    view = usageView({ tracked: data.value, names: threads.value!, labels: labels() }, q);
+    views.set(key, view);
+  }
+
+  return withLive(view, [...live.sessions.values()], data);
+}
+
+function sessionLabel(id: string) {
+  const record = usage?.latest()?.sessions.find((s) => s.sessionId === id);
+  const named = live.sessions.get(id);
+
+  if (named) return named.label;
+
+  if (!threads.value) return null;
+
+  const who = whoOf(threads.value, {
+    sessionId: id,
+    title: record?.title ?? null,
+    project: record?.project ?? "",
+    repository: record?.repository,
+  });
+
+  return who.kind === "project" && !record ? null : labelOf(who).label;
+}
+
+async function accountsRoute(): Promise<AccountsView> {
+  const { logs, pool, hosts } = need(hub, "tokenhub");
+  const seats = pool.value?.seats ?? [];
+
+  if (!logs.value) throw new Error(logs.error ?? "tokenhub's logs haven't loaded yet.");
+
+  return {
+    history: logs.value.history,
+    moves: logs.value.moves.map((move) => ({ ...move, label: sessionLabel(move.session) })),
+    hosts: (await hosts()).map((h) => ({ ...h, seats: seats.filter((s) => s.host === h.host).length })),
+  };
+}
+
+async function executorRoute() {
+  const overview = need(executorOverview, "Executor");
+
+  if (overview.value === undefined) await overview.ready();
+  else if (Date.now() - overview.at > 30_000) void overview.refresh();
+
+  if (overview.value === undefined) throw new Error(overview.error ?? "Executor didn't answer.");
+
+  return overview.value;
+}
+
+async function executorChanged<T>(work: Promise<T>) {
+  const result = await work;
+
+  void executorOverview?.refresh().then(() => stream.stale("executor"));
+
+  return result;
+}
+
+await Promise.all([running.refresh(), threads.refresh(), hub?.pool.refresh(), hub?.logs.refresh(), watchFiles()]);
+
+publish();
+
+void usage?.get("7d");
+
+void executorOverview?.refresh();
 
 const server = Bun.serve({
   hostname: config.host,
   port: config.port,
   idleTimeout: 0,
-  development: process.env.NODE_ENV !== "production",
   routes: {
-    "/": app,
-    "/api/events": (req) => (trusted(req) ? events.stream() : forbidden()),
+    "/api/events": (req) => (trusted(req) ? stream.respond() : forbidden()),
+    "/api/usage": json(usageRoute),
+    "/api/accounts": json(accountsRoute),
+    "/api/accounts/policy": {
+      POST: json(async (req) => {
+        const body = await req.json();
+
+        return need(hub, "tokenhub").policy(body.policy, String(body.revision ?? ""), body.save === true);
+      }),
+    },
+    "/api/accounts/connect": { POST: json(async (req) => need(hub, "tokenhub").connect.start(String((await req.json()).email ?? ""))) },
+    "/api/accounts/connect/:id": {
+      GET: json((req) => need(hub, "tokenhub").connect.status(param(req, "id"))),
+      POST: json(async (req) => need(hub, "tokenhub").connect.code(param(req, "id"), String((await req.json()).code ?? ""))),
+    },
     "/api/repos": json(() => Promise.all(config.repos.map((repo) => repos.summary(repo)))),
     "/api/repos/:repo/workspaces": {
       POST: json(async (req) => {
         const { name } = await req.json();
         const id = await repos.create(repos.repo(param(req, "repo")), name);
-        await watchAll();
+        await watchFiles();
 
         return { id };
       }),
@@ -155,14 +273,14 @@ const server = Bun.serve({
     "/api/repos/:repo/push": { POST: json((req) => repos.push(param(req, "repo"))) },
     "/api/ws/:ws": {
       DELETE: json(async (req) => {
-        const { ws } = await repos.workspace(param(req, "ws"));
-        events.unwatch(ws.path);
+        const result = await repos.discard(param(req, "ws"));
+        await watchFiles();
 
-        return repos.discard(ws.id);
+        return result;
       }),
     },
-    "/api/ws/:ws/files": json(sharing((req) => repos.files(param(req, "ws")))),
-    "/api/ws/:ws/changes": json(sharing((req) => repos.changes(param(req, "ws")))),
+    "/api/ws/:ws/files": json((req) => repos.files(param(req, "ws"))),
+    "/api/ws/:ws/changes": json((req) => repos.changes(param(req, "ws"))),
     "/api/ws/:ws/file": {
       GET: json((req) => repos.read(param(req, "ws"), query(req, "path"))),
       PUT: json(async (req) => repos.write(param(req, "ws"), query(req, "path"), await req.text())),
@@ -177,43 +295,20 @@ const server = Bun.serve({
 
       return { contents: await Bun.file(join(config.drafts.dir, name)).text() };
     }),
-    "/api/agents": json(liveAgents.get),
-    "/api/agents/usage": json((req) => agentUsage(config, query(req, "range") || "30d")),
-    "/api/agents/policy": {
-      POST: json(async (req) => {
-        const { operation, policy, revision } = await req.json();
-        const result = await checkPolicy(config, operation === "save" ? "save" : "preview", policy, revision);
-
-        if (result.saved) events.emit({ type: "agents" });
-
-        return result;
-      }),
-    },
     "/api/plugins": json(() => plugins(config)),
     "/api/plugins/:id": { POST: json(async (req) => setPlugin(config, param(req, "id"), (await req.json()).enabled === true)) },
-    "/api/executor": json(() => needExecutor().overview()),
-    "/api/executor/:slug": json((req) => needExecutor().source(param(req, "slug"))),
-    "/api/executor/:slug/file": { PUT: json(async (req) => needExecutor().save(param(req, "slug"), query(req, "path"), await req.text())) },
-    "/api/executor/:slug/deploy": { POST: json((req) => needExecutor().deploy(param(req, "slug"))) },
+    "/api/executor": json(executorRoute),
+    "/api/executor/:slug": json((req) => need(executor, "Executor").source(param(req, "slug"))),
+    "/api/executor/:slug/file": {
+      PUT: json(async (req) => need(executor, "Executor").save(param(req, "slug"), query(req, "path"), await req.text())),
+    },
+    "/api/executor/:slug/deploy": { POST: json((req) => executorChanged(need(executor, "Executor").deploy(param(req, "slug")))) },
     "/api/executor/:slug/connect": {
-      POST: json(async (req) => needExecutor().connect(param(req, "slug"), (await req.json()).requirement)),
-    },
-    "/api/accounts": json(() => needTokenhub().accounts()),
-    "/api/accounts/settings": {
-      POST: json(async (req) => {
-        const { operation, settings, revision } = await req.json();
-
-        return needTokenhub().settings(operation === "save" ? "save" : "preview", settings, revision);
-      }),
-    },
-    "/api/accounts/connect": { POST: json(async (req) => needTokenhub().connect(String((await req.json()).email ?? ""))) },
-    "/api/accounts/connect/:id": {
-      GET: json((req) => needTokenhub().connection(param(req, "id"))),
-      POST: json(async (req) => needTokenhub().connection(param(req, "id"), String((await req.json()).code ?? ""))),
+      POST: json(async (req) => executorChanged(need(executor, "Executor").connect(param(req, "slug"), (await req.json()).requirement))),
     },
     "/api/*": () => Response.json({ error: "not found" }, { status: 404 }),
-    "/*": app,
   },
+  fetch: (req) => (req.method === "GET" || req.method === "HEAD" ? web(req) : new Response("not found", { status: 404 })),
 });
 
 console.log(`deck on ${server.url}`);
