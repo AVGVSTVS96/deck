@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { BunRequest } from "bun";
 import app from "../web/index.html";
 import { Tokenhub } from "./accounts";
-import { agents } from "./agents";
+import { agentUsage, agents, checkPolicy } from "./agents";
 import { loadConfig } from "./config";
 import { Events } from "./events";
 import { Executor } from "./executor";
@@ -178,6 +178,17 @@ const server = Bun.serve({
       return { contents: await Bun.file(join(config.drafts.dir, name)).text() };
     }),
     "/api/agents": json(liveAgents.get),
+    "/api/agents/usage": json((req) => agentUsage(config, query(req, "range") || "30d")),
+    "/api/agents/policy": {
+      POST: json(async (req) => {
+        const { operation, policy, revision } = await req.json();
+        const result = await checkPolicy(config, operation === "save" ? "save" : "preview", policy, revision);
+
+        if (result.saved) events.emit({ type: "agents" });
+
+        return result;
+      }),
+    },
     "/api/plugins": json(() => plugins(config)),
     "/api/plugins/:id": { POST: json(async (req) => setPlugin(config, param(req, "id"), (await req.json()).enabled === true)) },
     "/api/executor": json(() => needExecutor().overview()),
