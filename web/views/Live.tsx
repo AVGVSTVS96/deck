@@ -1,10 +1,8 @@
 import { useState } from "react";
 import type { AccountsView, LiveSession, Move, MoveCause } from "../../src/contract";
-import { relativeTime, useApi, useLiveList } from "../api";
+import { LIVE_ORDER, relativeTime, useAccounts, useApi, useLiveList } from "../api";
 import { useWidth } from "../chart";
 import { Empty, Link, useNow, when } from "../ui";
-
-const STATE_ORDER = { blocked: 0, working: 1, idle: 2 } as const;
 
 const APP_LABEL = new Map([
   ["telegram", "Telegram"],
@@ -29,11 +27,13 @@ const SHOWN = 12;
 
 export default function Live() {
   const sessions = useLiveList("s:").map(([, s]) => s);
-  const accounts = useLiveList("a:").map(([, a]) => a);
+  const { accounts, name } = useAccounts();
   const view = useApi<AccountsView>("/accounts", "accounts");
-  const name = (id: string | null) => (id === null ? "no account" : (accounts.find((a) => a.id === id)?.label ?? id));
-  const sorted = sessions.toSorted((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || b.since - a.since);
-  const blocked = sorted.filter((s) => s.state === "blocked");
+  const sorted = sessions.toSorted((a, b) => LIVE_ORDER[a.state] - LIVE_ORDER[b.state] || b.since - a.since);
+  const now = useNow();
+  const cutoff = now - DAY;
+  const blocked = sorted.filter((s) => s.state === "blocked" && s.since >= cutoff);
+  const stuck = sorted.filter((s) => s.state === "blocked" && s.since < cutoff);
 
   const groups = Map.groupBy(
     sorted.filter((s) => s.state !== "blocked"),
@@ -42,8 +42,6 @@ export default function Live() {
 
   const count = (state: LiveSession["state"]) => sessions.filter((s) => s.state === state).length;
   const hosts = new Set(sessions.map((s) => s.host));
-  const now = useNow();
-  const cutoff = now - DAY;
   const moves = view.data?.moves.filter((m) => m.at >= cutoff).toSorted((a, b) => b.at - a.at) ?? [];
   const [allMoves, setAllMoves] = useState(false);
 
@@ -60,12 +58,19 @@ export default function Live() {
         <AppDots />
       </header>
 
-      {blocked.length > 0 && (
+      {(blocked.length > 0 || stuck.length > 0) && (
         <section className="section blocked" aria-labelledby="blocked-title">
           <div className="section-head">
             <h2 id="blocked-title">Blocked, waiting on you</h2>
+            <span className="sub">in the last 24 hours</span>
           </div>
-          <SessionTable sessions={blocked} name={name} />
+          {blocked.length > 0 ? <SessionTable sessions={blocked} name={name} /> : <p className="pad muted">None.</p>}
+          {stuck.length > 0 && (
+            <details className="older">
+              <summary className="pad muted small">{stuck.length} older, from before the last 24 hours</summary>
+              <SessionTable sessions={stuck} name={name} />
+            </details>
+          )}
         </section>
       )}
 

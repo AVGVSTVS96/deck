@@ -1,6 +1,6 @@
 import { QueryClient, useQuery } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
-import type { Account, LiveSession, LiveValue, Pool, ServerEvent } from "../src/contract";
+import type { Account, LiveSession, LiveState, LiveValue, Pool, ServerEvent } from "../src/contract";
 
 export class ApiError extends Error {}
 
@@ -68,7 +68,7 @@ const liveListeners = new Set<() => void>();
 const lists = new Map<string, { from: Record<string, LiveValue>; list: [string, LiveValue][] }>();
 
 const subscribe = (listener: () => void) => {
-  if (!source) connect();
+  if (!source && !document.hidden) connect();
   liveListeners.add(listener);
 
   return () => liveListeners.delete(listener);
@@ -99,10 +99,9 @@ function apply(event: ServerEvent) {
 }
 
 let source: EventSource | null = null;
+let opened = false;
 
 function connect() {
-  let opened = false;
-
   source = new EventSource("/api/events");
   source.addEventListener("open", () => {
     if (opened) void queries.invalidateQueries();
@@ -117,6 +116,19 @@ function connect() {
   });
   source.addEventListener("message", (message) => apply(JSON.parse(message.data)));
 }
+
+/**
+ * A hidden tab gives its stream back: the browser allows six connections per host over HTTP/1.1, so six open tabs
+ * would otherwise starve every request. Showing the tab again reconnects, takes a fresh snapshot and refetches.
+ */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    source?.close();
+    source = null;
+    connected = false;
+    publish();
+  } else if (!source && liveListeners.size) connect();
+});
 
 export function useLive<K extends string>(key: K): LiveOf<K> | undefined {
   // SAFETY: the key prefix decides the value's shape on the server (contract.ts LiveKey), so it holds here.
@@ -141,6 +153,24 @@ export function useLiveList<P extends "s:" | "a:" | "app:">(prefix: P): [string,
 
   // SAFETY: as in useLive, the prefix decides the shape.
   return list as [string, LiveOf<`${P}x`>][];
+}
+
+/** Which session state a row or list leads with when it holds several. */
+export const LIVE_ORDER = { blocked: 0, working: 1, idle: 2 } as const satisfies Record<LiveState, number>;
+
+/** The pool's accounts in tokenhub's order, and one name for any account id. */
+export function useAccounts() {
+  const pool = useLive("pool");
+  const order = pool?.order ?? [];
+  const rank = (id: string) => order.indexOf(id) + 1 || order.length + 1;
+
+  const accounts = useLiveList("a:")
+    .map(([, a]) => a)
+    .toSorted((a, b) => rank(a.id) - rank(b.id));
+
+  const name = (id: string | null) => (id && id !== "none" ? (accounts.find((a) => a.id === id)?.label ?? id) : "No account");
+
+  return { accounts, pool, name };
 }
 
 export const useConnected = () => useSyncExternalStore(subscribe, () => connected);

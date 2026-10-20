@@ -1,5 +1,3 @@
-/* Files, Plugins and Executor */
-
 diffs-container {
   --diffs-light-bg: var(--surface);
   --diffs-dark-bg: var(--surface);
@@ -49,6 +47,18 @@ file-tree-container {
     line-height: 28px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+  }
+}
+
+.change-list,
+.reqs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+
+  & li {
+    border-bottom: 1px solid var(--rule);
   }
 }
 
@@ -147,10 +157,6 @@ file-tree-container {
     text-decoration: none;
   }
 
-  :is(.repo-tabs, .ws-bar) a:hover:not([aria-current]) {
-    border-color: var(--rule);
-  }
-
   .ws-bar a,
   .ws-add,
   .ws-new input {
@@ -217,7 +223,6 @@ file-tree-container {
   .viewer-pane {
     display: flex;
     flex-direction: column;
-    min-width: 0;
     min-height: 0;
   }
 
@@ -238,12 +243,7 @@ file-tree-container {
     display: flex;
     justify-content: space-between;
     margin-bottom: -8px;
-    color: var(--muted);
-    font-size: var(--t12);
     line-height: 16px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
   }
 
   .flow {
@@ -288,17 +288,6 @@ file-tree-container {
     font-variant-numeric: tabular-nums;
   }
 
-  .change-list {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    border-top: 1px solid var(--rule);
-  }
-
-  .change-list li {
-    border-bottom: 1px solid var(--rule);
-  }
-
   .change-list a {
     display: flex;
     align-items: center;
@@ -334,16 +323,11 @@ file-tree-container {
 
   .cp {
     flex: 1;
-    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     direction: rtl;
     text-align: left;
-  }
-
-  .delta {
-    font-variant-numeric: tabular-nums;
   }
 
   .commit,
@@ -398,8 +382,6 @@ file-tree-container {
 
     .changes-pane {
       max-height: none;
-      border-left: 0;
-      border-top: 1px solid var(--rule);
     }
   }
 }
@@ -416,7 +398,6 @@ file-tree-container {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    min-width: 0;
     padding: 12px 16px;
     border-right: 1px solid var(--rule);
     border-bottom: 1px solid var(--rule);
@@ -483,6 +464,10 @@ file-tree-container {
     margin-left: 2px;
     background: var(--muted);
     border-radius: 50%;
+
+    @media (prefers-reduced-motion: no-preference) {
+      transition: transform 120ms;
+    }
   }
 
   &[aria-checked="true"] {
@@ -498,26 +483,9 @@ file-tree-container {
 
 .executor {
   .facts {
-    display: grid;
     grid-template-columns: max-content 1fr;
     gap: 2px 12px;
-    margin: 0;
     font-variant-numeric: tabular-nums;
-  }
-
-  .facts dt {
-    color: var(--muted);
-  }
-
-  .facts dd {
-    margin: 0;
-  }
-
-  .reqs {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    border-top: 1px solid var(--rule);
   }
 
   .reqs li {
@@ -525,12 +493,10 @@ file-tree-container {
     align-items: center;
     gap: 8px;
     min-height: 36px;
-    border-bottom: 1px solid var(--rule);
   }
 
   .reqs li > .muted {
     flex: 1;
-    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -547,11 +513,5 @@ file-tree-container {
 
   .code {
     max-height: 560px;
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .plugins .switch span {
-    transition: transform 120ms;
   }
 }
