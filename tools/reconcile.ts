@@ -64,4 +64,6 @@ for (const range of ranges) {
 
 console.log(`\nworst ${(worst * 100).toFixed(4)}%`);
 
-process.exitCode = worst <= 0.01 ? 0 : 1;
+const onePercent = 0.01;
+
+process.exitCode = worst <= onePercent ? 0 : 1;

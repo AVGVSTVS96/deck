@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { LiveSession, LiveState, LiveValue } from "./contract";
-import { appOf, labelOf, rowOf, whoOf, type Names } from "./identity";
+import type { LiveSession, LiveState, LiveValue, Who } from "./contract";
+import { labelOf, projectOf, rowOf, whoOf, type Names } from "./identity";
 import { source } from "./sources";
 import type { PoolState } from "./tokenhub";
 import type { Tracked } from "./tracker";
@@ -65,6 +65,7 @@ async function read(claude: string, hex: string): Promise<Processes> {
 /** Running Claude sessions, blocked jobs and which hex apps are connected, re-read when any of them changes. */
 export const processes = (claude: string, hex: string) =>
   source({
+    name: "processes",
     load: () => read(claude, hex),
     watch: [
       { path: join(claude, "sessions"), only: /^\d+\.json$/ },
@@ -85,20 +86,24 @@ export function liveMap({ processes: found, pool, names, tracked }: Inputs): Liv
   const sessions = new Map<string, LiveSession>();
   const seats = new Map(pool?.seats.map((seat) => [seat.session, seat]));
   const known = new Map(tracked?.sessions.map((s) => [s.sessionId, s]));
+  const projects = new Map(tracked?.sessions.map((s) => [s.cwd, projectOf(s)]));
   const blocked = new Map(found?.blocked.map((job) => [job.sessionId, job]));
 
-  const session = (id: string, title: string | null, cwd: string, state: LiveState, since: number, host: string): LiveSession => {
+  /** The row is the one Usage ranks this session under; the label may use the process's own name, such as a bin/job `<owner>/<unit>`. */
+  const session = (id: string, name: string | null, cwd: string, state: LiveState, since: number, host: string): LiveSession => {
     const record = known.get(id);
+    const project = record ? projectOf(record) : (projects.get(cwd) ?? cwd);
 
-    const who = names
-      ? whoOf(names, { sessionId: id, title: record?.title ?? title, project: record?.project ?? cwd, repository: record?.repository })
-      : { kind: "project" as const, project: cwd };
+    const who = (title: string | null): Who => (names ? whoOf(names, { sessionId: id, title, project }) : { kind: "project", project });
+
+    const ranked = who(record?.title ?? null);
+    const shown = name && !record?.title ? who(name) : ranked;
 
     return {
       id,
-      label: labelOf(who).label,
-      row: rowOf(who, record?.key ?? id),
-      app: who.kind === "thread" ? appOf(who) : null,
+      label: labelOf(shown).label,
+      row: rowOf(ranked, record?.key ?? id),
+      app: ranked.kind === "thread" ? ranked.app : null,
       state,
       account: seats.get(id)?.account ?? null,
       host,

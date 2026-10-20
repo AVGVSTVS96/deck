@@ -28,7 +28,7 @@ const usage = config.tracker ? tracker(config.tracker, config.timezone, () => st
 const threads = names(config.hex);
 const running = processes(config.claude, config.hex);
 const web = await webAssets(config.web, production);
-const executorOverview = executor ? source({ load: () => executor.overview() }) : null;
+const executorOverview = executor ? source({ name: "executor", load: () => executor.overview() }) : null;
 
 let live: Live = { sessions: new Map(), map: {} };
 
@@ -152,17 +152,18 @@ async function usageRoute(req: BunRequest) {
 
   if (!data.value) throw new Error(data.error ?? "token-tracker hasn't answered yet.");
 
-  if (!threads.value) await threads.refresh();
+  if (!threads.value) await threads.ready();
+
   const key = JSON.stringify(q);
   let view = views.get(key);
 
   if (!view) {
     if (views.size > 64) views.clear();
-    view = usageView({ tracked: data.value, names: threads.value!, labels: labels(), trackerAt: data.at, trackerError: data.error }, q);
+    view = usageView({ tracked: data.value, names: threads.value!, labels: labels() }, q);
     views.set(key, view);
   }
 
-  return withLive(view, [...live.sessions.values()]);
+  return withLive(view, [...live.sessions.values()], data);
 }
 
 function sessionLabel(id: string) {
@@ -183,23 +184,23 @@ function sessionLabel(id: string) {
   return who.kind === "project" && !record ? null : labelOf(who).label;
 }
 
-function accountsRoute(): AccountsView {
-  const logs = need(hub, "tokenhub").logs.value;
-  const seats = hub!.pool.value?.seats ?? [];
+async function accountsRoute(): Promise<AccountsView> {
+  const { logs, pool, hosts } = need(hub, "tokenhub");
+  const seats = pool.value?.seats ?? [];
 
-  if (!logs) throw new Error("tokenhub's logs haven't loaded yet.");
+  if (!logs.value) throw new Error(logs.error ?? "tokenhub's logs haven't loaded yet.");
 
   return {
-    history: logs.history,
-    moves: logs.moves.map((move) => ({ ...move, label: sessionLabel(move.session) })),
-    hosts: logs.hosts.map((h) => ({ ...h, seats: seats.filter((s) => s.host === h.host).length })),
+    history: logs.value.history,
+    moves: logs.value.moves.map((move) => ({ ...move, label: sessionLabel(move.session) })),
+    hosts: (await hosts()).map((h) => ({ ...h, seats: seats.filter((s) => s.host === h.host).length })),
   };
 }
 
 async function executorRoute() {
   const overview = need(executorOverview, "Executor");
 
-  if (overview.value === undefined) await overview.refresh();
+  if (overview.value === undefined) await overview.ready();
   else if (Date.now() - overview.at > 30_000) void overview.refresh();
 
   if (overview.value === undefined) throw new Error(overview.error ?? "Executor didn't answer.");

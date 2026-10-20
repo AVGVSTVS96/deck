@@ -23,6 +23,9 @@ const MEASURES: Measure[] = ["tokens", "api", "plan", "fiveHour", "week"];
 const DIMENSIONS: Dimension[] = ["app", "harness", "model", "project", "device", "account"];
 const COLORS = 7;
 
+/** The account of a session no limit rise was charged to. */
+const NO_ACCOUNT = "none";
+
 /** One session's share of one model on one account. Parts of a session sum back to the session exactly. */
 type Part = {
   session: TrackedSession;
@@ -90,13 +93,14 @@ function partsOf(session: TrackedSession, names: Names): Part[] {
   }
 
   const total = kinds.fiveHour + kinds.week;
-  const split = accounts.size ? [...accounts] : [["", { fiveHour: 0, week: 0 }] as const];
+  const charged = [...accounts].filter(([, points]) => points.fiveHour + points.week > 0);
+  const split = charged.length ? charged : [[NO_ACCOUNT, { fiveHour: 0, week: 0 }] as const];
 
   return models.flatMap(([model, modelAmount]) => {
     const api = session.amount.apiUsd ? ratio(modelAmount.apiUsd, session.amount.apiUsd) : ratio(modelAmount.tokens, session.amount.tokens);
 
     return split.map(([account, points]) => {
-      const weight = accounts.size ? ratio(points.fiveHour + points.week, total) : 1;
+      const weight = charged.length ? ratio(points.fiveHour + points.week, total) : 1;
 
       return {
         session,
@@ -155,6 +159,8 @@ function keyOf(part: Part, by: GroupBy) {
   }
 }
 
+const accountLabel = (id: string, labels: Labels) => (id === NO_ACCOUNT ? "No account" : (labels.accounts[id] ?? id));
+
 type Description = { label: string; detail: string; who: Who | null };
 
 function describe(part: Part, by: GroupBy, labels: Labels): Description {
@@ -178,7 +184,7 @@ function describe(part: Part, by: GroupBy, labels: Labels): Description {
     case "device":
       return { label: labels.devices[session.deviceId] ?? session.deviceId, detail: "", who: null };
     case "account":
-      return { label: part.account ? (labels.accounts[part.account] ?? part.account) : "No account", detail: "", who: null };
+      return { label: accountLabel(part.account, labels), detail: "", who: null };
   }
 }
 
@@ -297,7 +303,7 @@ export function parseQuery(params: URLSearchParams): UsageQuery {
   };
 }
 
-type Input = { tracked: Tracked; names: Names; labels: Labels; trackerAt: number | null; trackerError: string | null };
+type Input = { tracked: Tracked; names: Names; labels: Labels };
 
 const partCache = new WeakMap<Tracked, { names: Names; parts: Part[] }>();
 
@@ -312,13 +318,9 @@ function allParts(tracked: Tracked, names: Names) {
   return parts;
 }
 
-function keysOf(part: Part) {
-  return GROUPS.map((by) => keyOf(part, by));
-}
-
 /** The Usage view: totals, the ranked rows, the top-seven series and coverage for one query. Pure apart from its cache. */
 export function usageView(
-  { tracked, names, labels, trackerAt, trackerError }: Input,
+  { tracked, names, labels }: Input,
   query: UsageQuery,
 ): Omit<UsageView, "rows"> & {
   rows: (UsageRow & { sessionIds: Set<string> })[];
@@ -335,7 +337,7 @@ export function usageView(
   const parts = all.filter(
     (part) =>
       filters.every(({ dimension, values }) => values.includes(dimensionOf(part, dimension))) &&
-      (!query.within || keysOf(part).includes(query.within)),
+      (!query.within || part.agent === query.within),
   );
 
   const colors = new Map(
@@ -350,7 +352,7 @@ export function usageView(
   );
 
   const needle = query.search.toLowerCase();
-  const shown = needle ? groups.filter((g) => `${g.label}\n${g.detail}\n${g.key}`.toLowerCase().includes(needle)) : groups;
+  const shown = needle ? groups.filter((g) => `${g.label}\n${g.detail}`.toLowerCase().includes(needle)) : groups;
   const limits = tracked.windows.length > 0;
 
   const points = (g: { fiveHour: number; week: number }) =>
@@ -381,6 +383,10 @@ export function usageView(
         };
 
   const top = groups.slice(0, COLORS);
+  const taken = new Set(top.flatMap((g) => (colors.has(g.key) ? [colors.get(g.key)] : [])));
+  const free = Array.from({ length: COLORS }, (_, slot) => slot).filter((slot) => !taken.has(slot));
+
+  for (const g of top) if (!colors.has(g.key)) colors.set(g.key, free.shift() ?? COLORS);
   const rest = groups.slice(COLORS);
 
   const series = [
@@ -419,13 +425,7 @@ export function usageView(
     }
 
     const label = (id: string) =>
-      dimension === "account"
-        ? id
-          ? (labels.accounts[id] ?? id)
-          : "No account"
-        : dimension === "device"
-          ? (labels.devices[id] ?? id)
-          : id;
+      dimension === "account" ? accountLabel(id, labels) : dimension === "device" ? (labels.devices[id] ?? id) : id;
 
     return [...sessions]
       .map(([id, set]) => ({ id, label: label(id), count: set.size }))
@@ -476,11 +476,19 @@ export function usageView(
       unassigned: [...unassigned.values()].filter((u) => u.points > 0),
     },
     facets,
-    sources: { trackerAt, trackerError, devices: tracked.devices },
+    sources: { trackerAt: null, trackerError: null, devices: tracked.devices },
   };
 }
 
 /** Lights each row from the live sessions; cheap, so it runs on every request over a cached view. */
-export function withLive(view: ReturnType<typeof usageView>, live: LiveSession[]): UsageView {
-  return { ...view, rows: view.rows.map(({ sessionIds, ...row }) => ({ ...row, live: liveOf(row.key, sessionIds, live) })) };
+export function withLive(
+  view: ReturnType<typeof usageView>,
+  live: LiveSession[],
+  tracker: { at: number | null; error: string | null },
+): UsageView {
+  return {
+    ...view,
+    rows: view.rows.map(({ sessionIds, ...row }) => ({ ...row, live: liveOf(row.key, sessionIds, live) })),
+    sources: { ...view.sources, trackerAt: tracker.at, trackerError: tracker.error },
+  };
 }

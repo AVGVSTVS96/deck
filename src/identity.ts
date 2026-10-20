@@ -132,6 +132,7 @@ async function load(hex: string): Promise<Names> {
 /** hex's thread names, reloaded when a threads.json changes and every 5 minutes for hex.db. */
 export const names = (hex: string) =>
   source({
+    name: "hex names",
     load: () => load(hex),
     watch: [{ path: join(hex, "state"), recursive: true, only: /^[^/]+\/threads\.json$/ }],
     everyMs: 5 * 60_000,

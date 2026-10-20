@@ -29,19 +29,23 @@ async function build(dir: string) {
 /** The browser bundle, split per view and gzipped once at startup. Outside production, a change in the web folder rebuilds it. */
 export async function webAssets(dir: string, production: boolean) {
   let assets = await build(dir);
+  let latest = 0;
 
   if (!production) {
-    watch([{ path: dir, recursive: true }], () =>
+    watch([{ path: dir, recursive: true }], () => {
+      const run = ++latest;
+
       build(dir).then(
-        (next) => (assets = next),
+        (next) => run === latest && (assets = next),
         (error) => console.error(error),
-      ),
-    );
+      );
+    });
   }
 
   return (req: Request) => {
     const path = new URL(req.url).pathname;
-    const asset = assets.get(path) ?? (path.includes(".") ? undefined : assets.get("/index.html"));
+    const page = req.headers.get("accept")?.includes("text/html");
+    const asset = assets.get(path) ?? (page ? assets.get("/index.html") : undefined);
 
     if (!asset) return new Response("not found", { status: 404 });
 

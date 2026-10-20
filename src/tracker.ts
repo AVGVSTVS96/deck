@@ -69,6 +69,7 @@ export function tracker(url: string, timezone: string, watching: () => boolean) 
     RANGES.map((range) => [
       range,
       source({
+        name: `token-tracker ${range}`,
         load: () => read(url, range, timezone),
         everyMs: EVERY_MS,
         active: () => (range === "7d" && watching()) || Date.now() - (viewed.get(range) ?? 0) < VIEWED_MS,
@@ -82,7 +83,7 @@ export function tracker(url: string, timezone: string, watching: () => boolean) 
 
       viewed.set(range, Date.now());
 
-      if (data.value === undefined) await data.refresh();
+      if (data.value === undefined) await data.ready();
 
       return { value: data.value, at: data.at || null, error: data.error };
     },

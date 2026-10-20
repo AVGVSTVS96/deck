@@ -57,6 +57,12 @@ export async function loadConfig(): Promise<Config> {
     review: repo.review === true,
   }));
 
+  if (file.tokenhub && !file.tokenhub.dir) {
+    throw new Error(
+      'deck config: "tokenhub" is now { "dir": <tokenhub folder>, "onboard": <its sign-in URL> }, and token-tracker\'s URL goes in "tracker".',
+    );
+  }
+
   return {
     host: process.env.HOST ?? file.host ?? "127.0.0.1",
     port: Number(process.env.PORT ?? file.port ?? 4810),

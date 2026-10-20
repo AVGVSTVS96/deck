@@ -177,10 +177,24 @@ function movesOf(attribution: Logged[], recovery: Logged[], since: number): Omit
   return moves.toSorted((a, b) => b.at - a.at);
 }
 
-export type History = Omit<AccountsView, "moves" | "hosts"> & {
-  moves: Omit<Move, "label">[];
-  hosts: { host: string; seenAt: number | null }[];
-};
+export type History = Omit<AccountsView, "moves" | "hosts"> & { moves: Omit<Move, "label">[] };
+
+/** The Mac and other remote hosts, by when they last reported their seats. Read per request: a heartbeat isn't news. */
+async function hosts(state: string) {
+  const remote = join(state, "remote");
+  const names = (await readdir(remote).catch(() => [])).flatMap((name) => (name.endsWith(".json") ? [name.slice(0, -5)] : []));
+
+  const seen = await Promise.all(
+    names.map((name) =>
+      stat(join(remote, `${name}.json`)).then(
+        (s) => s.mtimeMs,
+        () => null,
+      ),
+    ),
+  );
+
+  return [{ host: "server", seenAt: null }, ...names.map((host, i) => ({ host, seenAt: seen[i] }))];
+}
 
 async function history(state: string): Promise<History> {
   const now = Date.now();
@@ -208,47 +222,39 @@ async function history(state: string): Promise<History> {
     }
   }
 
-  const remote = join(state, "remote");
-  const hostNames = (await readdir(remote).catch(() => [])).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5));
-
-  const seen = await Promise.all(
-    hostNames.map((name) =>
-      stat(join(remote, `${name}.json`)).then(
-        (s) => s.mtimeMs,
-        () => null,
-      ),
-    ),
-  );
-
   return {
     history: [...lines.values()],
     moves: movesOf(attribution, recovery, now - MOVES_MS),
-    hosts: [{ host: "server", seenAt: null }, ...hostNames.map((host, i) => ({ host, seenAt: seen[i] }))],
   };
 }
 
 type RoutingInput = { config: Policy; expectedRevision?: string };
 
-async function routing(dir: string, mode: "snapshot" | "preview" | "save", input?: RoutingInput): Promise<Wire> {
+async function routing({ dir, state, config }: Settings, mode: "snapshot" | "preview" | "save", input?: RoutingInput): Promise<Wire> {
   const run = Bun.spawn([process.execPath, join(dir, "routing.ts"), mode], {
     cwd: dir,
+    env: { ...process.env, TOKENHUB_STATE: state, TOKENHUB_CONFIG: config },
     stdin: input ? new Blob([JSON.stringify(input)]) : "ignore",
     stdout: "pipe",
     stderr: "ignore",
+    timeout: 20_000,
   });
 
   const [text] = await Promise.all([new Response(run.stdout).text(), run.exited]);
+
+  if (!text.trim()) throw new Error(`tokenhub's routing.ts ${mode} gave no answer (exit ${run.exitCode ?? run.signalCode}).`);
 
   return JSON.parse(text);
 }
 
 /** The only tokenhub client: its routing CLI for the pool, its logs for history and moves, tokenhub-onboard for sign-in. */
 export function tokenhub(settings: Settings) {
-  const { dir, state, config, onboard } = settings;
+  const { state, config, onboard } = settings;
 
   const pool = source({
+    name: "tokenhub pool",
     load: async () => {
-      const wire = await routing(dir, "snapshot");
+      const wire = await routing(settings, "snapshot");
 
       if (wire.error) throw new Error(wire.error.message);
 
@@ -262,8 +268,9 @@ export function tokenhub(settings: Settings) {
   });
 
   const logs = source({
+    name: "tokenhub logs",
     load: () => history(state),
-    watch: [{ path: state, only: /^(usage-history|attribution|recovery)\.ndjson$/ }, { path: join(state, "remote") }],
+    watch: [{ path: state, only: /^(usage-history|attribution|recovery)\.ndjson$/ }],
     debounceMs: 30_000,
   });
 
@@ -271,12 +278,14 @@ export function tokenhub(settings: Settings) {
     const input: RoutingInput = { config: proposed };
 
     if (save) input.expectedRevision = revision;
-    const wire = await routing(dir, save ? "save" : "preview", input);
+    const wire = await routing(settings, save ? "save" : "preview", input);
 
     if (wire.error?.code === "revision_conflict") {
       await pool.refresh();
 
-      return { pool: pool.value!.pool, saved: false, conflict: true };
+      if (!pool.value) throw new Error(pool.error ?? "tokenhub's pool couldn't be read.");
+
+      return { pool: pool.value.pool, saved: false, conflict: true };
     }
 
     if (wire.error) throw new Error(wire.error.message);
@@ -313,6 +322,7 @@ export function tokenhub(settings: Settings) {
   return {
     pool,
     logs,
+    hosts: () => hosts(state),
     policy,
     connect: {
       start: (email: string) => connect("/api/start", { email }),

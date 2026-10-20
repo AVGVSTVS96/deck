@@ -38,9 +38,12 @@ export type Source<T> = {
   on(change: (value: T) => void): void;
   /** One load in flight; a call during a load queues exactly one more. */
   refresh(): Promise<void>;
+  /** The load in flight, or a new one: for a caller that only needs a value, not a newer one. */
+  ready(): Promise<void>;
 };
 
 type Options<T> = {
+  name: string;
   load: () => Promise<T>;
   watch?: Watch[];
   debounceMs?: number;
@@ -48,18 +51,19 @@ type Options<T> = {
   active?: () => boolean;
 };
 
-export function source<T>({ load, watch: paths = [], debounceMs, everyMs, active = () => true }: Options<T>): Source<T> {
+export function source<T>({ name, load, watch: paths = [], debounceMs, everyMs, active = () => true }: Options<T>): Source<T> {
   const listeners = new Set<(value: T) => void>();
   let running: Promise<void> | null = null;
   let again = false;
   let text = "";
 
-  const self: { value: T | undefined; at: number; error: string | null } & Pick<Source<T>, "on" | "refresh"> = {
+  const self: { value: T | undefined; at: number; error: string | null } & Pick<Source<T>, "on" | "refresh" | "ready"> = {
     value: undefined,
     at: 0,
     error: null,
     on: (change: (value: T) => void) => void listeners.add(change),
     refresh,
+    ready: () => running ?? refresh(),
   };
 
   async function run() {
@@ -80,8 +84,11 @@ export function source<T>({ load, watch: paths = [], debounceMs, everyMs, active
         for (const change of listeners) change(next);
       } catch (error) {
         self.error = error instanceof Error ? error.message : String(error);
+        console.error(`${name}: ${self.error}`);
       }
     } while (again);
+
+    running = null;
   }
 
   function refresh() {
@@ -91,7 +98,7 @@ export function source<T>({ load, watch: paths = [], debounceMs, everyMs, active
       return running;
     }
 
-    running = run().finally(() => (running = null));
+    running = run();
 
     return running;
   }
