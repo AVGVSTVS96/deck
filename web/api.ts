@@ -6,7 +6,7 @@ export class ApiError extends Error {}
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, init);
-  const body = await response.json();
+  const body = await response.json().catch(() => ({}));
 
   if (!response.ok) throw new ApiError(body.error ?? `Request failed (${response.status})`);
 

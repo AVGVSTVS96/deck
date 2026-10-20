@@ -176,6 +176,8 @@ function elapsedNow({ elapsed, sampledAt, resetsAt }: LimitWindow) {
 /** The one limit meter: used fill, the policy cutoff tick, and a caret for how much of the window has passed. */
 export function Meter({ label, window, detail }: { label: ReactNode; window: LimitWindow; detail?: ReactNode }) {
   const { used, cutoff, resetsAt } = window;
+
+  useNow();
   const elapsed = elapsedNow(window);
   const tone = used === null ? "" : used >= cutoff ? "over" : used >= cutoff - 15 ? "near" : "";
   const text = used === null ? "no reading" : `${Math.round(used)}% used, cutoff ${cutoff}%`;

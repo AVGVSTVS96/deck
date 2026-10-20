@@ -132,7 +132,14 @@ function AccountCard({
             caption={`${a.label}: limit use over the last 7 days`}
             from={now - WEEK}
             to={now}
-            cutoffs={pool ? [pool.policy.weeklyCutoff, pool.policy.sessionCutoff] : []}
+            cutoffs={
+              pool
+                ? [
+                    { label: "week", value: pool.policy.weeklyCutoff },
+                    { label: "5h", value: pool.policy.sessionCutoff },
+                  ]
+                : []
+            }
             lines={history.map((h) => ({
               key: h.kind,
               label: h.kind === "week" ? "Week" : "5 hours",
@@ -152,6 +159,7 @@ function AccountCard({
                   <span className="who clip">
                     <i className="swatch" data-c={row.color} />
                     {row.label}
+                    <span className="muted small">{row.detail}</span>
                   </span>
                   <span className="num">{fmt.pts(points)} pts</span>
                 </li>
@@ -316,6 +324,8 @@ function SignIn({ email: initial, onClose }: { email: string; onClose: () => voi
   const [connection, setConnection] = useState<Connection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [failures, setFailures] = useState(0);
+  const steps = useRef(0);
   const joined = connection?.status === "connected";
 
   useEffect(() => dialog.current?.showModal(), []);
@@ -323,19 +333,30 @@ function SignIn({ email: initial, onClose }: { email: string; onClose: () => voi
   useEffect(() => {
     if (!connection || connection.status === "connected" || connection.status === "failed") return;
 
+    const asked = steps.current;
+
     const timer = setTimeout(
       () =>
-        api<Connection>(`/accounts/connect/${connection.id}`).then(setConnection, (e) =>
-          setError(e instanceof Error ? e.message : String(e)),
+        api<Connection>(`/accounts/connect/${connection.id}`).then(
+          (next) => {
+            if (steps.current !== asked) return;
+            setFailures(0);
+            setConnection(next);
+          },
+          (e) => {
+            setError(e instanceof Error ? e.message : String(e));
+            setFailures((n) => n + 1);
+          },
         ),
-      2000,
+      2000 * Math.min(failures + 1, 5),
     );
 
     return () => clearTimeout(timer);
-  }, [connection]);
+  }, [connection, failures]);
 
   const step = (action: () => Promise<Connection>) => async (e: FormEvent) => {
     e.preventDefault();
+    steps.current++;
     setBusy(true);
     setError(null);
 

@@ -672,6 +672,7 @@ dialog::backdrop {
 .field {
   display: grid;
   gap: 4px;
+  align-content: start;
 }
 
 .field > span {
@@ -1041,7 +1042,7 @@ td.share > * {
 
 .figures {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr));
   gap: 12px;
 }
 
@@ -1222,7 +1223,9 @@ td.share > * {
     display: block;
   }
 
-  .rank:not([data-all]) tbody tr:nth-child(n + 11) {
+  .ranking:not(.open) .rank tbody tr:nth-child(n + 11),
+  .ranking:not(.open) .table-foot button,
+  .ranking.open .phone-more {
     display: none;
   }
 
@@ -1592,5 +1595,11 @@ button.primary:disabled {
 
   .rank .bar {
     width: 140px;
+  }
+}
+
+@media (min-width: 720px) {
+  .sort {
+    display: none;
   }
 }

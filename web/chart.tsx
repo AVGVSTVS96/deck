@@ -212,7 +212,7 @@ export function Steps({
   lines: Line[];
   from: number;
   to: number;
-  cutoffs: number[];
+  cutoffs: { label: string; value: number }[];
   height?: number;
   caption: string;
 }) {
@@ -263,8 +263,8 @@ export function Steps({
               </text>
             </g>
           ))}
-          {[...new Set(cutoffs)].map((c) => (
-            <line key={c} className="cutoff" x1={pad.left} x2={width - pad.right} y1={y(c)} y2={y(c)} />
+          {cutoffs.map((c) => (
+            <line key={c.label} className="cutoff" x1={pad.left} x2={width - pad.right} y1={y(c.value)} y2={y(c.value)} />
           ))}
           {days.map((t, i) =>
             i % step === 0 ? (
@@ -315,7 +315,7 @@ export function Steps({
             {line.label}
           </span>
         ))}
-        {cutoffs.length > 0 && <span>┄ cutoff {[...new Set(cutoffs)].map((c) => `${c}%`).join(" / ")}</span>}
+        {cutoffs.length > 0 && <span>┄ cutoffs: {cutoffs.map((c) => `${c.label} ${c.value}%`).join(" · ")}</span>}
       </div>
     </div>
   );

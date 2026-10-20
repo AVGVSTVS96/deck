@@ -154,7 +154,7 @@ export default function Live() {
   );
 }
 
-const LANE = 22;
+const LANE = 28;
 
 /** One lane per account across the last day: a mark for every session that arrived on it, by cause. */
 function Lanes({ moves, accounts, from }: { moves: Move[]; accounts: [id: string, label: string][]; from: number }) {
@@ -173,21 +173,28 @@ function Lanes({ moves, accounts, from }: { moves: Move[]; accounts: [id: string
           {ids.map((id, i) => (
             <g key={id} transform={`translate(0 ${i * LANE})`}>
               <line className="gridline" x1={left} x2={width - left} y1={LANE - 1} y2={LANE - 1} />
-              <text className="tick" x={left} y={10}>
+              <text className="tick" x={left} y={11}>
                 {label.get(id) ?? id}
               </text>
               {moves
                 .filter((m) => m.to === id)
                 .map((m) => (
-                  <rect key={`${m.at}:${m.session}`} className={`mark ${m.cause}`} x={x(m.at) - 1} y={12} width={2} height={8}>
+                  <rect key={`${m.at}:${m.session}`} className={`mark ${m.cause}`} x={x(m.at) - 1} y={15} width={2} height={9}>
                     <title>{`${m.label ?? m.session} ${CAUSE[m.cause]}, ${when(m.at)}`}</title>
                   </rect>
                 ))}
             </g>
           ))}
           {hours.map((t, i) => (
-            <text key={t} className="tick" x={x(t)} y={height - 4} textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}>
-              {i === 4 ? "now" : when(t)}
+            <text
+              key={t}
+              className="tick"
+              x={x(t)}
+              y={height - 4}
+              textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}
+              display={width < 500 && i % 4 ? "none" : undefined}
+            >
+              {i === 4 ? "now" : i === 0 && width < 500 ? "24 hours ago" : when(t)}
             </text>
           ))}
         </svg>

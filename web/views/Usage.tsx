@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { Bucket, Dimension, GroupBy, Measure, Range, Totals, UsageRow, UsageView } from "../../src/contract";
+import type { Bucket, Dimension, GroupBy, LiveState, Measure, Range, Totals, UsageRow, UsageView } from "../../src/contract";
 import { api, setParams, useApi, useLive, useLiveList, useSearch } from "../api";
 import { Columns, Spark } from "../chart";
-import { Empty, Link, Meter, STANDING, Seg, fail, fmt, when } from "../ui";
+import { Empty, Link, Meter, STANDING, Seg, fail, fmt, useNow, when } from "../ui";
 
 const RANGES = [
   ["today", "Today"],
@@ -111,13 +111,19 @@ const titleOf = (b: Bucket) => {
 
 export default function Usage() {
   const state = useQueryState();
-  const { range, by, measure, selected } = state;
+  const { range, selected } = state;
   const path = usagePath(state, state.all ? { limit: "100000" } : { limit: String(PAGE) });
   const usage = useApi<UsageView>(path, "usage");
   const view = useKept(usage.data);
-  const m = MEASURES.find(([key]) => key === measure)!;
+  const [phoneAll, setPhoneAll] = useState(false);
   const onPage = view?.rows.find((r) => r.key === selected) ?? null;
-  const offPage = useApi<UsageView>(selected && view && !onPage ? usagePath(state, { within: selected, limit: "1" }) : null, "usage");
+
+  const offPage = useApi<UsageView>(
+    selected && view && !onPage && state.by === "agent" ? usagePath(state, { within: selected, limit: "1" }) : null,
+    "usage",
+  );
+
+  useNow();
 
   if (!view)
     return usage.error ? (
@@ -127,9 +133,11 @@ export default function Usage() {
     );
 
   const chosen = onPage ?? offPage.data?.rows.find((r) => r.key === selected) ?? null;
+  const { by, measure } = view.query;
+  const m = MEASURES.find(([key]) => key === measure) ?? MEASURES[1];
 
   return (
-    <div className={usage.fetching && !usage.data ? "page usage fade dim" : "page usage fade"}>
+    <div className={usage.data ? "page usage fade" : "page usage fade dim"}>
       <header className="head">
         <div>
           <h1>Usage</h1>
@@ -144,6 +152,8 @@ export default function Usage() {
 
       <Filters state={state} view={view} />
 
+      {usage.error && <p className="alert">{usage.error}. Showing the last answer.</p>}
+
       {view.sources.trackerError && (
         <p className="alert">token-tracker didn't answer: {view.sources.trackerError}. These numbers are from its last good read.</p>
       )}
@@ -152,7 +162,7 @@ export default function Usage() {
 
       <div className="split">
         <div className="main-col">
-          <section className="section ranking" aria-labelledby="ranking-title">
+          <section className={phoneAll ? "section ranking open" : "section ranking"} aria-labelledby="ranking-title">
             <div className="section-head">
               <h2 id="ranking-title">
                 Usage by{" "}
@@ -165,7 +175,7 @@ export default function Usage() {
               <Search value={state.q} />
               <label className="sort">
                 <span className="muted small">Sort</span>
-                <select value={measure} onChange={(e) => setParams({ measure: e.currentTarget.value })}>
+                <select value={state.measure} onChange={(e) => setParams({ measure: e.currentTarget.value })}>
                   {MEASURES.map(([key, label]) => (
                     <option key={key} value={key}>
                       {label} ↓
@@ -174,7 +184,7 @@ export default function Usage() {
                 </select>
               </label>
             </div>
-            <Ranking view={view} measure={m} selected={selected} all={state.all} />
+            <Ranking view={view} measure={m} selected={selected} onPhoneAll={() => setPhoneAll(true)} />
             <div className="table-foot muted small">
               <span>
                 {fmt.int(view.rowCount)} {view.rowCount === 1 ? "group" : "groups"} · {fmt.int(view.totals.sessions)} sessions
@@ -226,7 +236,7 @@ export default function Usage() {
 
 const period = (view: UsageView) => {
   const from = new Date(view.period.from);
-  const to = new Date(view.period.to);
+  const to = new Date(view.period.to - 1);
   const day = { month: "short", day: "numeric" } as const;
 
   return from.toDateString() === to.toDateString()
@@ -433,9 +443,36 @@ type MeasureDef = (typeof MEASURES)[number];
 
 const shortAccount = (label: string) => label.split("@")[0];
 
-function Ranking({ view, measure, selected, all }: { view: UsageView; measure: MeasureDef; selected: string | null; all: boolean }) {
+const LIVE_RANK = { blocked: 0, working: 1, idle: 2 } as const;
+
+/** Each agent row's liveliest running session, so the dots follow the stream rather than the last usage read. */
+function useLiveRows() {
+  const live = new Map<string, LiveState>();
+
+  for (const [, s] of useLiveList("s:")) {
+    const seen = live.get(s.row);
+
+    if (!seen || LIVE_RANK[s.state] < LIVE_RANK[seen]) live.set(s.row, s.state);
+  }
+
+  return live;
+}
+
+function Ranking({
+  view,
+  measure,
+  selected,
+  onPhoneAll,
+}: {
+  view: UsageView;
+  measure: MeasureDef;
+  selected: string | null;
+  onPhoneAll: () => void;
+}) {
   const [key, , value] = measure;
   const accounts = useLiveList("a:");
+  const liveRows = useLiveRows();
+  const liveOf = (r: UsageRow) => (view.query.by === "agent" ? (liveRows.get(r.key) ?? null) : r.live);
   const accountLabel = (id: string) => (id && id !== "none" ? (accounts.find(([k]) => k === id)?.[1].label ?? id) : "none");
   const max = Math.max(...view.rows.map(value), 0) || 1;
 
@@ -458,7 +495,7 @@ function Ranking({ view, measure, selected, all }: { view: UsageView; measure: M
 
   return (
     <div className="table-wrap">
-      <table className="table rank" data-all={all || undefined}>
+      <table className="table rank">
         <caption className="sr">Usage ranked by {measure[1].toLowerCase()}. Select a row for its sessions and limit detail.</caption>
         <thead>
           <tr>
@@ -496,7 +533,7 @@ function Ranking({ view, measure, selected, all }: { view: UsageView; measure: M
                 <span className="who">
                   <i className="swatch" data-c={r.color} />
                   <b>{r.label}</b>
-                  {r.live && <span className={`dot ${r.live}`} title={r.live} aria-label={r.live} />}
+                  {liveOf(r) && <span className={`dot ${liveOf(r)}`} title={liveOf(r)!} aria-label={liveOf(r)!} />}
                 </span>
                 <span className="muted small">{r.detail}</span>
               </td>
@@ -529,9 +566,9 @@ function Ranking({ view, measure, selected, all }: { view: UsageView; measure: M
           ))}
         </tbody>
       </table>
-      {!all && view.rows.length > PHONE_ROWS && (
-        <button className="phone-more" onClick={() => setParams({ all: "1" })}>
-          Show all {fmt.int(view.rowCount)}
+      {view.rows.length > PHONE_ROWS && (
+        <button className="phone-more" onClick={onPhoneAll}>
+          Show {view.rows.length - PHONE_ROWS} more
         </button>
       )}
     </div>
@@ -558,7 +595,7 @@ function Limits() {
             <div className="limit-name">
               <b>{a.label}</b>
               {a.id === pool?.next && <span className="chip next">next</span>}
-              <span className="muted small">{STANDING[a.standing]}</span>
+              {a.standing !== "next" && <span className="muted small">{STANDING[a.standing]}</span>}
             </div>
             <div className="limit-meters">
               <Meter label="5 hours" window={a.fiveHour} />
