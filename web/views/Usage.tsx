@@ -56,6 +56,7 @@ function useQueryState() {
     measure: oneOf(MEASURES, params.get("measure"), "api"),
     where,
     q: params.get("q") ?? "",
+    within: params.get("within"),
     selected: params.get("sel"),
     all: params.has("all"),
   };
@@ -63,17 +64,21 @@ function useQueryState() {
 
 type State = ReturnType<typeof useQueryState>;
 
-function usagePath(s: Pick<State, "range" | "by" | "measure" | "where" | "q">, extra: Record<string, string> = {}) {
+function usageParams(s: Pick<State, "range" | "by" | "measure" | "where" | "q" | "within">, extra: Record<string, string> = {}) {
   const params = new URLSearchParams({ range: s.range, by: s.by, measure: s.measure });
 
   for (const [d, values] of s.where) params.set(`w.${d}`, values.join(","));
 
   if (s.q) params.set("q", s.q);
 
+  if (s.within) params.set("within", s.within);
+
   for (const [k, v] of Object.entries(extra)) params.set(k, v);
 
-  return `/usage?${params}`;
+  return params;
 }
+
+const usagePath = (...args: Parameters<typeof usageParams>) => `/usage?${usageParams(...args)}`;
 
 /** Keeps the last answer on screen while a new query loads, so the frame never jumps. */
 function useKept<T>(data: T | null) {
@@ -278,6 +283,11 @@ function Search({ value }: { value: string }) {
 function Filters({ state, view }: { state: State; view: UsageView }) {
   const active = new Map(state.where);
 
+  const owner = useApi<UsageView>(
+    state.within ? usagePath({ ...state, by: "agent", where: [], q: "" }, { within: state.within, limit: "1" }) : null,
+    "usage",
+  );
+
   return (
     <div className="filters" role="group" aria-label="Filters">
       {DIMENSIONS.map(([d, label]) => (
@@ -293,7 +303,7 @@ function Filters({ state, view }: { state: State; view: UsageView }) {
         values.map((v) => (
           <button
             key={`${d}:${v}`}
-            className="chip on"
+            className="chip"
             aria-label={`Remove filter ${v}`}
             onClick={() => setParams({ [`w.${d}`]: values.filter((x) => x !== v).join(","), sel: null })}
           >
@@ -301,8 +311,20 @@ function Filters({ state, view }: { state: State; view: UsageView }) {
           </button>
         )),
       )}
-      {state.where.length > 0 && (
-        <button className="quiet small" onClick={() => setParams(Object.fromEntries(DIMENSIONS.map(([d]) => [`w.${d}`, null])))}>
+      {state.within && (
+        <button
+          className="chip"
+          aria-label="Show every session, not just this agent's"
+          onClick={() => setParams({ within: null, sel: null })}
+        >
+          Sessions of {owner.data?.rows[0]?.label ?? "one agent"} ✕
+        </button>
+      )}
+      {(state.where.length > 0 || state.within) && (
+        <button
+          className="quiet small"
+          onClick={() => setParams({ ...Object.fromEntries(DIMENSIONS.map(([d]) => [`w.${d}`, null])), within: null, sel: null })}
+        >
           Clear filters
         </button>
       )}
@@ -702,9 +724,7 @@ function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow |
                 {sessions.data.rowCount > sessions.data.rows.length && (
                   <li className="more muted small">
                     and {sessions.data.rowCount - sessions.data.rows.length} more ·{" "}
-                    <Link to={`/?${new URLSearchParams({ range: state.range, by: "session", measure: state.measure, q: row.label })}`}>
-                      see all
-                    </Link>
+                    <Link to={`/?${usageParams({ ...state, by: "session", q: "", within: row.key })}`}>see all</Link>
                   </li>
                 )}
               </ul>
