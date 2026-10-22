@@ -52,7 +52,7 @@ async function read(claude: string, hex: string): Promise<Processes> {
     )
   ).filter((job) => job !== null);
 
-  const apps = (await readdir(state).catch(() => [])).filter((app) => existsSync(join(state, app, "threads.json")));
+  const apps = (await readdir(state).catch(() => [])).filter((app) => existsSync(join(state, app, "sessions")));
 
   return {
     running: [...running.values()].toSorted((a, b) => a.sessionId.localeCompare(b.sessionId)),
@@ -69,7 +69,7 @@ export const processes = (claude: string, hex: string) =>
     watch: [
       { path: join(claude, "sessions"), only: /^\d+\.json$/ },
       { path: join(claude, "jobs"), recursive: true, only: /^[^/]+\/state\.json$/ },
-      { path: join(hex, "state"), recursive: true, only: /^[^/]+\/(hub\.sock|threads\.json)$/ },
+      { path: join(hex, "state"), recursive: true, only: /^[^/]+\/(hub\.sock|sessions)$/ },
     ],
   });
 

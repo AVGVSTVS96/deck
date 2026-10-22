@@ -1,6 +1,5 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
-import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Who } from "./contract";
 import { source } from "./sources";
@@ -8,13 +7,12 @@ import { source } from "./sources";
 type Thread = { app: string; thread: string; name: string };
 
 export type Names = {
-  /** Thread by its current Claude session (threads.json). */
+  /** Thread by its current Claude session, from hex.db's threads. */
   current: Record<string, Thread>;
   /** Thread by the first 8 characters of a past session id, from hex.db messages whose meta names the session's log. */
   logged: Record<string, Thread>;
   /** Threads by name, across apps. */
   named: Record<string, Thread[]>;
-  apps: string[];
 };
 
 export type Session = { sessionId: string; title: string | null; project: string; repository?: string | null };
@@ -80,31 +78,20 @@ export function labelOf(who: Who) {
 export const appOf = (who: Who) => (who.kind === "thread" ? who.app : who.kind === "job" ? "job" : "other");
 
 async function load(hex: string): Promise<Names> {
-  const state = join(hex, "state");
-  const apps = (await readdir(state).catch(() => [])).filter((app) => existsSync(join(state, app, "threads.json")));
+  const dbPath = join(hex, "state", "hex.db");
+  const db = existsSync(dbPath) ? new Database(dbPath, { readonly: true }) : null;
   const threads = new Map<string, Thread>();
   const current: Record<string, Thread> = {};
   const logged: Record<string, Thread> = {};
   const key = (app: string, thread: string) => `${app}\n${thread}`;
 
-  const dbPath = join(state, "hex.db");
-  const db = existsSync(dbPath) ? new Database(dbPath, { readonly: true }) : null;
-
   try {
-    for (const row of db?.query<Thread, []>("select app, thread, name from threads").all() ?? []) {
+    for (const { session, ...row } of db
+      ?.query<Thread & { session: string | null }, []>("select app, thread, name, session from threads")
+      .all() ?? []) {
       threads.set(key(row.app, row.thread), row);
-    }
 
-    for (const app of apps) {
-      const file: Record<string, { name?: string; session?: string }> = await Bun.file(join(state, app, "threads.json")).json();
-
-      for (const [thread, entry] of Object.entries(file)) {
-        const known = { app, thread, name: entry.name ?? threads.get(key(app, thread))?.name ?? thread };
-
-        threads.set(key(app, thread), known);
-
-        if (entry.session) current[entry.session] = known;
-      }
+      if (session) current[session] = row;
     }
 
     const logs = db?.query<{ app: string; thread: string; log: string }, []>(
@@ -126,14 +113,13 @@ async function load(hex: string): Promise<Names> {
 
   for (const thread of threads.values()) (named[thread.name] ??= []).push(thread);
 
-  return { current, logged, named, apps };
+  return { current, logged, named };
 }
 
-/** hex's thread names, reloaded when a threads.json changes and every 5 minutes for hex.db. */
+/** hex's thread names, reloaded when hex.db changes. */
 export const names = (hex: string) =>
   source({
     name: "hex names",
     load: () => load(hex),
-    watch: [{ path: join(hex, "state"), recursive: true, only: /^[^/]+\/threads\.json$/ }],
-    everyMs: 5 * 60_000,
+    watch: [{ path: join(hex, "state"), only: /^hex\.db(-wal)?$/ }],
   });
