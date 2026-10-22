@@ -2,19 +2,30 @@ import { existsSync, watch as watchPath } from "node:fs";
 
 export type Watch = { path: string; recursive?: boolean; only?: RegExp };
 
-/** Calls `change` once, `ms` after the first matching file event in a burst. A steady stream of writes can't starve it. */
-export function watch(paths: Watch[], change: () => void, ms = 250) {
+/** Calls `change` once, `ms` after the first call in a burst. A steady stream of calls can't starve it. */
+function burst(change: () => void, ms: number) {
   let timer: Timer | undefined;
+
+  const ring = () => {
+    timer ??= setTimeout(() => {
+      timer = undefined;
+      change();
+    }, ms);
+  };
+
+  return { ring, stop: () => clearTimeout(timer) };
+}
+
+/** Calls `change` once, `ms` after the first matching file event in a burst. */
+export function watch(paths: Watch[], change: () => void, ms = 250) {
+  const changed = burst(change, ms);
 
   const watchers = paths.flatMap(({ path, recursive = false, only }) => {
     if (!existsSync(path)) return [];
 
     const watcher = watchPath(path, { recursive }, (_, file) => {
       if (only && !(file && only.test(file))) return;
-      timer ??= setTimeout(() => {
-        timer = undefined;
-        change();
-      }, ms);
+      changed.ring();
     });
 
     watcher.on("error", () => watcher.close());
@@ -23,10 +34,25 @@ export function watch(paths: Watch[], change: () => void, ms = 250) {
   });
 
   return () => {
-    clearTimeout(timer);
+    changed.stop();
 
     for (const watcher of watchers) watcher.close();
   };
+}
+
+/** Calls `change` once, `ms` after the first output in a burst from a command that prints a line per change, like `hex watch`; one that ends starts again. */
+export function follow(command: string[], change: () => void, ms = 250) {
+  const changed = burst(change, ms);
+
+  async function run() {
+    const child = Bun.spawn(command, { stdout: "pipe", stderr: "inherit" });
+
+    for await (const _ of child.stdout) changed.ring();
+    console.error(`${command.join(" ")} exited ${await child.exited}; starting it again`);
+    setTimeout(run, 2000);
+  }
+
+  void run();
 }
 
 export type Source<T> = {
@@ -46,6 +72,8 @@ type Options<T> = {
   name: string;
   load: () => Promise<T>;
   watch?: Watch[];
+  /** A command that prints a line per change, read again after each. */
+  follow?: string[];
   debounceMs?: number;
   everyMs?: number;
   active?: () => boolean;
@@ -57,6 +85,7 @@ export function source<T>({
   name,
   load,
   watch: paths = [],
+  follow: command,
   debounceMs,
   everyMs,
   active = () => true,
@@ -114,6 +143,8 @@ export function source<T>({
   }
 
   if (paths.length) watch(paths, () => void refresh(), debounceMs);
+
+  if (command) follow(command, () => void refresh(), debounceMs);
 
   if (everyMs) setInterval(() => active() && void refresh(), everyMs);
 

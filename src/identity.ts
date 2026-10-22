@@ -1,5 +1,3 @@
-import { Database } from "bun:sqlite";
-import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Who } from "./contract";
 import { source } from "./sources";
@@ -7,9 +5,9 @@ import { source } from "./sources";
 type Thread = { app: string; thread: string; name: string };
 
 export type Names = {
-  /** Thread by its current Claude session, from hex.db's threads. */
+  /** Thread by its current Claude session, from `hex threads`. */
   current: Record<string, Thread>;
-  /** Thread by the first 8 characters of a past session id, from hex.db messages whose meta names the session's log. */
+  /** Thread by the first 8 characters of a past session id, from `hex log` messages whose meta names the session's log. */
   logged: Record<string, Thread>;
   /** Threads by name, across apps. */
   named: Record<string, Thread[]>;
@@ -29,7 +27,7 @@ export function threadLink(app: string, thread: string) {
 
 /**
  * Who a session is, in order:
- * its thread's current session; a past session of a thread, by hex.db's log; a title that names exactly one thread;
+ * its thread's current session; a past session of a thread, by hex's log; a title that names exactly one thread;
  * a bin/job title `<owner>/<unit>`; any other title; else its project. A name alone never joins two threads.
  */
 export function whoOf(names: Names, session: Session): Who {
@@ -77,36 +75,63 @@ export function labelOf(who: Who) {
 
 export const appOf = (who: Who) => (who.kind === "thread" ? who.app : who.kind === "job" ? "job" : "other");
 
+type ThreadRow = Thread & { session?: string };
+
+type LogRow = { to: string; meta?: { app?: string; log?: string } };
+
+/** What `hex <command> --json` prints, through the hex command, so the deck never reads hex.db's tables. */
+async function hexJson<T>(hex: string, command: string) {
+  const run = Bun.spawn([join(hex, ".hex", "bin", "hex"), command, "--json"], { stdout: "pipe", stderr: "pipe" });
+  const [out, error, code] = await Promise.all([new Response(run.stdout).text(), new Response(run.stderr).text(), run.exited]);
+
+  if (code) throw new Error(`hex ${command}: ${error.trim() || `exited ${code}`}`);
+
+  // SAFETY: hex's --json output is a list of the rows it documents.
+  return JSON.parse(out) as T[];
+}
+
+/**
+ * The thread key of each past session by the first 8 characters of its id, from messages whose meta names the session's log.
+ * Only hex's old log import wrote those, so hex's whole log is read once, not at every change.
+ */
+let pastSessions: Promise<Map<string, string>> | undefined;
+
+async function readPast(hex: string) {
+  const past = new Map<string, string>();
+
+  for (const { to, meta } of await hexJson<LogRow>(hex, "log")) {
+    const id = meta?.log?.match(/-([0-9a-f]{8})\.md$/)?.[1];
+
+    if (id && meta?.app) past.set(id, key(meta.app, to));
+  }
+
+  return past;
+}
+
+const key = (app: string, thread: string) => `${app}\n${thread}`;
+
 async function load(hex: string): Promise<Names> {
-  const dbPath = join(hex, "state", "hex.db");
-  const db = existsSync(dbPath) ? new Database(dbPath, { readonly: true }) : null;
+  pastSessions ??= readPast(hex).catch((error) => {
+    pastSessions = undefined;
+    throw error;
+  });
+  const [rows, past] = await Promise.all([hexJson<ThreadRow>(hex, "threads"), pastSessions]);
   const threads = new Map<string, Thread>();
   const current: Record<string, Thread> = {};
   const logged: Record<string, Thread> = {};
-  const key = (app: string, thread: string) => `${app}\n${thread}`;
 
-  try {
-    for (const { session, ...row } of db
-      ?.query<Thread & { session: string | null }, []>("select app, thread, name, session from threads")
-      .all() ?? []) {
-      threads.set(key(row.app, row.thread), row);
+  for (const { app, thread, name, session } of rows) {
+    const row = { app, thread, name };
 
-      if (session) current[session] = row;
-    }
+    threads.set(key(app, thread), row);
 
-    const logs = db?.query<{ app: string; thread: string; log: string }, []>(
-      `select distinct json_extract(meta, '$.app') as app, "to" as thread, json_extract(meta, '$.log') as log
-       from messages where json_extract(meta, '$.log') is not null and json_extract(meta, '$.app') is not null`,
-    );
+    if (session) current[session] = row;
+  }
 
-    for (const row of logs?.all() ?? []) {
-      const id = row.log.match(/-([0-9a-f]{8})\.md$/)?.[1];
-      const thread = threads.get(key(row.app, row.thread));
+  for (const [id, at] of past) {
+    const thread = threads.get(at);
 
-      if (id && thread) logged[id] = thread;
-    }
-  } finally {
-    db?.close();
+    if (thread) logged[id] = thread;
   }
 
   const named: Record<string, Thread[]> = {};
@@ -116,10 +141,10 @@ async function load(hex: string): Promise<Names> {
   return { current, logged, named };
 }
 
-/** hex's thread names, reloaded when hex.db changes. */
+/** hex's thread names, read again each time `hex watch` says hex.db changed. */
 export const names = (hex: string) =>
   source({
     name: "hex names",
     load: () => load(hex),
-    watch: [{ path: join(hex, "state"), only: /^hex\.db(-wal)?$/ }],
+    follow: [join(hex, ".hex", "bin", "hex"), "watch"],
   });
