@@ -207,7 +207,7 @@ export default function Usage() {
                 </button>
               </p>
             ) : chosen ? (
-              <Detail view={view} row={chosen} picked state={state} />
+              <Detail row={chosen} picked state={state} />
             ) : null}
             <Ranking view={view} measure={m} selected={selected} onPhoneAll={() => setPhoneAll(true)} />
             <div className="table-foot muted small">
@@ -648,7 +648,7 @@ function Limits() {
   );
 }
 
-function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow | null; picked: boolean; state: State }) {
+function Detail({ row, picked, state }: { row: UsageRow | null; picked: boolean; state: State }) {
   const { name } = useAccounts();
   const detail = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -755,20 +755,6 @@ function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow |
           </div>
         )}
 
-        {view.coverage.unassigned.length > 0 && (
-          <div className="drill">
-            <h3 className="small muted">Not tied to any session this period</h3>
-            <ul className="sessions">
-              {view.coverage.unassigned.map((u) => (
-                <li key={`${u.account}:${u.kind}`}>
-                  <span className="clip">{name(u.account)}</span>
-                  <span className="muted">{u.kind === "week" ? "week" : "5h"}</span>
-                  <span className="num">{fmt.pts(u.points)} pts</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
         <p className="muted small">
           Points are estimates: each rise in an account's limit reading is split across the sessions using it then, by API value.
         </p>
