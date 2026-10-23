@@ -1555,6 +1555,7 @@ button.primary:disabled {
 }
 
 .account-filters button[aria-pressed="true"] {
+  color: var(--ink);
   border-color: var(--ink);
   background: var(--recessed);
 }
