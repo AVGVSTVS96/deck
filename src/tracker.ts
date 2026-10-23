@@ -35,7 +35,7 @@ export type Tracked = {
   devices: { id: string; label: string; syncedAt: number | null }[];
 };
 
-const RANGES: Range[] = ["today", "7d", "30d", "6m"];
+const RANGES: Range[] = ["today", "yesterday", "7d", "30d", "6m"];
 const EVERY_MS = 5 * 60_000;
 const VIEWED_MS = 10 * 60_000;
 

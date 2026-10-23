@@ -1,4 +1,4 @@
-export type Range = "today" | "7d" | "30d" | "6m";
+export type Range = "today" | "yesterday" | "7d" | "30d" | "6m";
 
 export type GroupBy = "agent" | "session" | "project" | "model" | "harness" | "device" | "account";
 

@@ -17,7 +17,7 @@ import type {
 import { appOf, labelOf, projectOf, rowOf, whoOf, type Names } from "./identity";
 import type { Tracked, TrackedSession } from "./tracker";
 
-const RANGES: Range[] = ["today", "7d", "30d", "6m"];
+const RANGES: Range[] = ["today", "yesterday", "7d", "30d", "6m"];
 const GROUPS: GroupBy[] = ["agent", "session", "project", "model", "harness", "device", "account"];
 const MEASURES: Measure[] = ["tokens", "api", "plan", "fiveHour", "week"];
 const DIMENSIONS: Dimension[] = ["app", "harness", "model", "project", "device", "account"];

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Account, AccountsView, Connection, Policy, PolicyResult, Pool, UsageView } from "../../src/contract";
 import { api, send, useAccounts, useApi } from "../api";
 import { Steps } from "../chart";
-import { Busy, Empty, Meter, STANDING, fmt, toast, useAction, useNow, when } from "../ui";
+import { Busy, Empty, Link, Meter, STANDING, fmt, toast, useAction, useNow, when } from "../ui";
 
 const WEEK = 7 * 86_400_000;
 const SOON = 3 * 86_400_000;
@@ -25,6 +25,12 @@ export default function Accounts() {
         </button>
       </header>
 
+      {view.error && <p className="alert">Account history could not load: {view.error}</p>}
+      {week.error && (
+        <p className="alert">
+          Agent usage could not load: {week.error} <button onClick={() => void week.reload()}>Retry</button>
+        </p>
+      )}
       {!ranked.length && <Empty>No accounts in the pool yet.</Empty>}
       <div className="cards">
         {ranked.map((a) => (
@@ -153,11 +159,11 @@ function AccountCard({
             <ul className="sessions">
               {top.map(({ row, points }) => (
                 <li key={row.key}>
-                  <span className="who clip">
+                  <Link to={`/?range=7d&w.account=${a.id}&sel=${encodeURIComponent(row.key)}`} className="who clip">
                     <i className="swatch" data-c={row.color} />
                     {row.label}
                     <span className="muted small">{row.detail}</span>
-                  </span>
+                  </Link>
                   <span className="num">{fmt.pts(points)} pts</span>
                 </li>
               ))}

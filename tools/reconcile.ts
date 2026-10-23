@@ -1,7 +1,8 @@
+import type { Tracked } from "../src/tracker";
 import type { GroupBy, Range, UsageView } from "../src/contract";
 
 const [deck = "http://127.0.0.1:4810", tracker = "http://127.0.0.1:8787", ...picked] = process.argv.slice(2);
-const all: Range[] = ["today", "7d", "30d", "6m"];
+const all: Range[] = ["today", "yesterday", "7d", "30d", "6m"];
 const ranges = picked.length ? all.filter((range) => picked.includes(range)) : all;
 const groupings: GroupBy[] = ["agent", "session", "project", "model", "harness", "device", "account"];
 const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -9,7 +10,13 @@ const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 type Totals = { tokens: number; costUSD: number; subscriptionUSD: number; requests: number; sessions: number };
 
 async function trackerTotals(range: Range): Promise<Totals> {
-  const request = { _tag: "Request", id: "0", tag: "GetUsage", payload: { range, timezone }, headers: [] };
+  const request = {
+    _tag: "Request",
+    id: "0",
+    tag: range === "yesterday" ? "GetSessionUsage" : "GetUsage",
+    payload: { range, timezone },
+    headers: [],
+  };
 
   const response = await fetch(`${tracker}/rpc`, {
     method: "POST",
@@ -19,7 +26,21 @@ async function trackerTotals(range: Range): Promise<Totals> {
 
   const frame = (await response.text()).split("\n").find((line) => line.includes('"Exit"')) ?? "{}";
 
-  return JSON.parse(frame).exit.value.totals;
+  const value = JSON.parse(frame).exit.value;
+
+  if (range !== "yesterday") return value.totals;
+  const tracked: Tracked = value;
+
+  return tracked.sessions.reduce(
+    (total, session) => ({
+      tokens: total.tokens + session.amount.tokens,
+      costUSD: total.costUSD + session.amount.apiUsd,
+      subscriptionUSD: total.subscriptionUSD + session.amount.planUsd,
+      requests: total.requests + session.amount.requests,
+      sessions: total.sessions + 1,
+    }),
+    { tokens: 0, costUSD: 0, subscriptionUSD: 0, requests: 0, sessions: 0 },
+  );
 }
 
 const deckUsage = async (range: Range, by: GroupBy): Promise<UsageView> =>

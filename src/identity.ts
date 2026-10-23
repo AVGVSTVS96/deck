@@ -18,6 +18,8 @@ export type Session = { sessionId: string; title: string | null; project: string
 const JOB = /^(.+)\/([\w.@-]+)$/;
 
 export function threadLink(app: string, thread: string) {
+  if (app === "t3") return `t3-thread://v1/${thread}`;
+
   if (app !== "telegram") return null;
   const [chat, topic] = thread.split(":");
   const internal = chat.replace(/^-100/, "");

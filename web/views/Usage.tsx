@@ -6,6 +6,7 @@ import { Empty, Link, Meter, STANDING, Seg, fail, fmt, useNow, when } from "../u
 
 const RANGES = [
   ["today", "Today"],
+  ["yesterday", "Yesterday"],
   ["7d", "7 days"],
   ["30d", "30 days"],
   ["6m", "6 months"],
@@ -24,12 +25,19 @@ const GROUPS = [
 const usdAxis = (n: number) => `$${fmt.axis(n)}`;
 
 const MEASURES = [
-  ["tokens", "Tokens", (r: UsageRow) => r.amount.tokens, fmt.tokens, fmt.axis, "Tokens"],
-  ["api", "API value", (r: UsageRow) => r.amount.apiUsd, fmt.usd, usdAxis, "API $"],
-  ["plan", "Plan cost", (r: UsageRow) => r.amount.planUsd, fmt.usd, usdAxis, "Plan $"],
-  ["fiveHour", "5h points", (r: UsageRow) => r.points.fiveHour ?? 0, fmt.pts, fmt.pts, "5h pts"],
-  ["week", "Week points", (r: UsageRow) => r.points.week ?? 0, fmt.pts, fmt.pts, "Week pts"],
-] as const satisfies readonly (readonly [Measure, string, (r: UsageRow) => number, (n: number) => string, (n: number) => string, string])[];
+  ["tokens", "Tokens", (r: Pick<UsageRow, "amount" | "points">) => r.amount.tokens, fmt.tokens, fmt.axis, "Tokens"],
+  ["api", "API value", (r: Pick<UsageRow, "amount" | "points">) => r.amount.apiUsd, fmt.usd, usdAxis, "API $"],
+  ["plan", "Allocated plan fee", (r: Pick<UsageRow, "amount" | "points">) => r.amount.planUsd, fmt.usd, usdAxis, "Fee $"],
+  ["fiveHour", "5-hour use (estimated)", (r: Pick<UsageRow, "amount" | "points">) => r.points.fiveHour ?? 0, fmt.pts, fmt.pts, "5h pts"],
+  ["week", "Weekly use (estimated)", (r: Pick<UsageRow, "amount" | "points">) => r.points.week ?? 0, fmt.pts, fmt.pts, "Week pts"],
+] as const satisfies readonly (readonly [
+  Measure,
+  string,
+  (r: Pick<UsageRow, "amount" | "points">) => number,
+  (n: number) => string,
+  (n: number) => string,
+  string,
+])[];
 
 const DIMENSIONS: [Dimension, string][] = [
   ["app", "Apps"],
@@ -163,7 +171,9 @@ export default function Usage() {
         <p className="alert">token-tracker didn't answer: {view.sources.trackerError}. These numbers are from its last good read.</p>
       )}
 
+      <AccountFilters selected={state.where.find(([dimension]) => dimension === "account")?.[1] ?? []} />
       <Summary totals={view.totals} previous={view.previous} />
+      <Coverage view={view} />
 
       <div className="split">
         <div className="main-col">
@@ -179,7 +189,7 @@ export default function Usage() {
               <span className="spacer" />
               <Search value={state.q} />
               <label className="sort">
-                <span className="muted small">Sort</span>
+                <span className="muted small">Rank by</span>
                 <select value={state.measure} onChange={(e) => setParams({ measure: e.currentTarget.value })}>
                   {MEASURES.map(([key, label]) => (
                     <option key={key} value={key}>
@@ -189,6 +199,16 @@ export default function Usage() {
                 </select>
               </label>
             </div>
+            {selected && !chosen && (state.by !== "agent" || offPage.data) ? (
+              <p className="pad muted" aria-live="polite">
+                This row has no usage in this range.{" "}
+                <button className="quiet small" onClick={() => setParams({ sel: null })}>
+                  Close detail
+                </button>
+              </p>
+            ) : chosen ? (
+              <Detail view={view} row={chosen} picked state={state} />
+            ) : null}
             <Ranking view={view} measure={m} selected={selected} onPhoneAll={() => setPhoneAll(true)} />
             <div className="table-foot muted small">
               <span>
@@ -230,16 +250,6 @@ export default function Usage() {
 
         <aside className="side">
           <Limits />
-          {selected && !chosen && (state.by !== "agent" || offPage.data) ? (
-            <section className="section pad muted" aria-live="polite">
-              The row you opened has no usage in this range.{" "}
-              <button className="quiet small" onClick={() => setParams({ sel: null })}>
-                Show the top row
-              </button>
-            </section>
-          ) : (
-            <Detail view={view} row={chosen ?? view.rows[0] ?? null} picked={chosen !== null} state={state} />
-          )}
         </aside>
       </div>
 
@@ -423,34 +433,28 @@ function Delta({ now, then, unit = "%" }: { now: number; then: number | undefine
 function Summary({ totals, previous }: { totals: Totals; previous: Totals | null }) {
   const cells = [
     {
-      label: "Tokens",
-      value: fmt.tokens(totals.tokens),
-      delta: <Delta now={totals.tokens} then={previous?.tokens} />,
-      foot: `${fmt.pct(totals.cacheHitRate)} cache hit · ${fmt.tokens(totals.requests)} requests`,
-    },
-    {
-      label: "API value",
+      label: "API equivalent",
       value: fmt.usd(totals.apiUsd),
       delta: <Delta now={totals.apiUsd} then={previous?.apiUsd} />,
-      foot: "The same use at API prices",
+      foot: "Work at API prices · not a bill",
     },
     {
-      label: "Plan cost",
-      value: fmt.usd(totals.planUsd),
-      delta: <Delta now={totals.planUsd} then={previous?.planUsd} />,
-      foot: "Monthly fees spread over use",
+      label: "Output tokens",
+      value: fmt.tokens(totals.output),
+      delta: <Delta now={totals.output} then={previous?.output} />,
+      foot: `${fmt.tokens(totals.requests)} requests · ${fmt.int(totals.sessions)} sessions`,
     },
     {
-      label: "Limit points",
-      value: totals.points.week === null ? "–" : fmt.pts(totals.points.week),
+      label: "Cached input",
+      value: fmt.tokens(totals.cacheRead),
       delta: null,
-      foot: `week · ${fmt.pts(totals.points.fiveHour)} five-hour, all accounts`,
+      foot: `${fmt.tokens(totals.tokens)} total tokens, including cached reads`,
     },
     {
-      label: "Sessions",
-      value: fmt.int(totals.sessions),
-      delta: <Delta now={totals.sessions} then={previous?.sessions} unit="count" />,
-      foot: totals.unpricedTokens ? `${fmt.tokens(totals.unpricedTokens)} tokens unpriced` : "with any use in range",
+      label: "Assigned weekly use",
+      value: totals.points.week === null ? "–" : `${fmt.pts(totals.points.week)} pts`,
+      delta: null,
+      foot: "Estimated across accounts · 100 pts = one full limit",
     },
   ];
 
@@ -502,6 +506,7 @@ function Ranking({
   const { name } = useAccounts();
   const liveRows = useLiveRows();
   const liveOf = (r: UsageRow) => (view.query.by === "agent" ? (liveRows.get(r.key) ?? null) : r.live);
+  const total = value({ amount: view.totals, points: view.totals.points });
   const max = Math.max(...view.rows.map(value), 0) || 1;
 
   if (!view.rows.length)
@@ -555,12 +560,15 @@ function Ranking({
                   <b>{r.label}</b>
                   {liveOf(r) && <span className={`dot ${liveOf(r)}`} title={liveOf(r)!} aria-label={liveOf(r)!} />}
                 </span>
-                <span className="muted small">{r.detail}</span>
+                <span className="muted small">
+                  {r.detail} · {fmt.int(r.sessions)} {r.sessions === 1 ? "session" : "sessions"}
+                </span>
               </td>
               <td className="share">
                 <span className="bar" data-c={r.color}>
                   <i style={{ width: `${(value(r) / max) * 100}%` }} />
                 </span>
+                <span className="share-value muted small">{total ? fmt.pct(value(r) / total) : "–"} of total</span>
                 <Spark values={r.series} color={r.color} />
               </td>
               <td className="accts muted small">{r.byAccount.map((a) => shortAccount(name(a.account))).join(" · ") || "–"}</td>
@@ -581,6 +589,31 @@ function Ranking({
           Show {view.rows.length - PHONE_ROWS} more
         </button>
       )}
+    </div>
+  );
+}
+
+const left = (used: number | null) => (used === null ? "unknown" : `${Math.max(0, 100 - used)}% left`);
+
+function AccountFilters({ selected }: { selected: readonly string[] }) {
+  const { accounts } = useAccounts();
+
+  if (!accounts.length) return null;
+
+  return (
+    <div className="account-filters" role="group" aria-label="Current account limits; select to filter usage">
+      {accounts.map((account) => (
+        <button
+          key={account.id}
+          aria-pressed={selected.includes(account.id)}
+          onClick={() => setParams({ "w.account": selected.length === 1 && selected[0] === account.id ? null : account.id, sel: null })}
+        >
+          <b>{account.label}</b>
+          <span className="small muted">
+            Week: {left(account.week.used)} · 5h: {left(account.fiveHour.used)}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -617,6 +650,10 @@ function Limits() {
 
 function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow | null; picked: boolean; state: State }) {
   const { name } = useAccounts();
+  const detail = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (row?.key) detail.current?.scrollIntoView({ block: "nearest" });
+  }, [row?.key]);
   const drills = state.by === "agent" && row !== null && row.sessions > 1;
 
   const sessions = useApi<UsageView>(
@@ -628,7 +665,7 @@ function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow |
   const weekTotal = row.byAccount.reduce((n, a) => n + (a.week ?? 0), 0) || 1;
 
   return (
-    <section className="section detail" aria-labelledby="detail-title" aria-live="polite">
+    <section ref={detail} className="section detail" aria-labelledby="detail-title" aria-live="polite">
       <div className="section-head">
         <div>
           <h2 id="detail-title">{row.label}</h2>
@@ -737,6 +774,24 @@ function Detail({ view, row, picked, state }: { view: UsageView; row: UsageRow |
         </p>
       </div>
     </section>
+  );
+}
+
+function Coverage({ view }: { view: UsageView }) {
+  const selected = view.query.where.account;
+  const unassigned = view.coverage.unassigned.filter((u) => u.kind === "week" && (!selected?.length || selected.includes(u.account)));
+  const points = unassigned.reduce((sum, u) => sum + u.points, 0);
+  const unnamed = Math.max(0, view.coverage.totalApiUsd - view.coverage.namedApiUsd);
+
+  if (!points && !unnamed) return null;
+
+  return (
+    <p className="coverage muted small">
+      {points > 0 && <span>{fmt.pts(points)} weekly points have no matching session. Rankings account for the assigned portion. </span>}
+      {unnamed > 0 && (
+        <span>{fmt.pct(unnamed / view.coverage.totalApiUsd)} of API value has no agent name; it is included under its project.</span>
+      )}
+    </p>
   );
 }
 

@@ -785,7 +785,7 @@ button.chip {
 .summary {
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top: 2px solid var(--ink);
   border-bottom: 2px solid var(--ink);
 }
@@ -834,7 +834,7 @@ button.chip {
 }
 
 .sort {
-  display: none;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
 }
@@ -1005,7 +1005,7 @@ td.share > * {
   border-top: 1px solid var(--rule);
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1600px) {
   .split {
     grid-template-columns: minmax(0, 2fr) minmax(380px, 1fr);
     align-items: start;
@@ -1026,15 +1026,15 @@ td.share > * {
 
 @media (max-width: 1099px) {
   .summary {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .summary > div:nth-child(4) {
+  .summary > div:nth-child(3) {
     border-left: 0;
     padding-left: 0;
   }
 
-  .summary > div:nth-child(n + 4) {
+  .summary > div:nth-child(n + 3) {
     border-top: 1px solid var(--rule);
   }
 }
@@ -1515,4 +1515,46 @@ button.primary:disabled {
   .by-account .share {
     display: none;
   }
+}
+
+.ranking > .detail {
+  margin: 0 16px 16px;
+}
+
+.share-value {
+  display: inline-block;
+  min-width: 78px;
+  margin-right: 12px;
+}
+
+.coverage {
+  margin: -8px 0 0;
+}
+
+@media (min-width: 720px) and (max-width: 1799px) {
+  .rank .spark {
+    display: none;
+  }
+
+  .rank .bar {
+    width: 64px;
+  }
+}
+
+.account-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-filters button {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 14px;
+}
+
+.account-filters button[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--recessed);
 }
