@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { Account, AccountsView, ActionsView, Connection, Policy, PolicyResult, Pool, UsageView } from "../../src/contract";
+import type { Account, AccountsView, Connection, Policy, PolicyResult, Pool, UsageView } from "../../src/contract";
 import { api, send, useAccounts, useApi } from "../api";
-import { Columns, Steps, type Series } from "../chart";
-import { Busy, Empty, Link, Meter, STANDING, dayOf, fmt, toast, useAction, useNow, when } from "../ui";
+import { Steps } from "../chart";
+import { Busy, Empty, Link, Meter, STANDING, fmt, toast, useAction, useNow, when } from "../ui";
 
 const WEEK = 7 * 86_400_000;
 const SOON = 3 * 86_400_000;
@@ -38,7 +38,6 @@ export default function Accounts() {
         ))}
       </div>
 
-      <Actions />
       {pool && <PolicyEditor pool={pool} />}
       {signIn !== null && <SignIn email={signIn} onClose={() => setSignIn(null)} />}
     </div>
@@ -172,105 +171,6 @@ function AccountCard({
           ) : (
             <p className="muted small">{week ? "No week points tied to agents yet." : "Reading usage…"}</p>
           )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const TOP_REPOS = 7;
-
-const total = (values: number[]) => values.reduce((n, v) => n + v, 0);
-
-/** Actions minutes per GitHub account, and the Claude limit use no session here explains, on the same days. */
-function Actions() {
-  const { data, error, reload } = useApi<ActionsView>("/actions", "actions", "usage");
-  const { name } = useAccounts();
-
-  if (!data)
-    return error ? (
-      <p className="alert">
-        GitHub Actions could not load: {error} <button onClick={() => void reload()}>Retry</button>
-      </p>
-    ) : null;
-
-  const labels = data.days.map((day) => dayOf(Date.parse(`${day}T12:00`)));
-  const several = data.github.length > 1;
-
-  const ranked = data.github
-    .flatMap((g) =>
-      g.repos.map((r) => ({ key: `${g.user}/${r.repo}`, label: several ? `${g.user}/${r.repo}` : r.repo, values: r.minutes })),
-    )
-    .toSorted((a, b) => total(b.values) - total(a.values));
-
-  const rest = ranked.slice(TOP_REPOS);
-
-  const minutes: Series[] = ranked.slice(0, TOP_REPOS).map((r, i) => Object.assign(r, { color: i }));
-
-  if (rest.length)
-    minutes.push({
-      key: "rest",
-      label: `${rest.length} more repos`,
-      color: TOP_REPOS,
-      values: labels.map((_, i) => rest.reduce((n, r) => n + r.values[i], 0)),
-    });
-
-  const elsewhere: Series[] = data.elsewhere.map((e, i) => ({ key: e.account, label: name(e.account), color: i, values: e.points }));
-
-  return (
-    <section className="section" aria-labelledby="actions-title">
-      <div className="section-head">
-        <h2 id="actions-title">GitHub Actions</h2>
-        <span className="sub">last 7 days</span>
-      </div>
-      <div className="pad account-body">
-        <dl className="facts">
-          {data.github.map((g) => (
-            <div key={g.user}>
-              <dt>{g.user}</dt>
-              <dd className={g.error ? "warn" : undefined}>
-                {g.error ?? `${fmt.int(Math.round(g.minutes))} minutes · ${fmt.usd(g.billedUsd)} billed`}
-              </dd>
-            </div>
-          ))}
-        </dl>
-
-        <div className="drill">
-          <h3>Minutes run, by repo</h3>
-          {minutes.length ? (
-            <Columns
-              labels={labels}
-              titles={labels}
-              series={minutes}
-              format={(n) => `${fmt.int(Math.round(n))} min`}
-              axis={fmt.axis}
-              height={160}
-              caption="Actions minutes per day, by repo"
-            />
-          ) : (
-            <p className="muted small">No Actions ran this week.</p>
-          )}
-        </div>
-
-        <div className="drill">
-          <h3>Claude use no session here explains</h3>
-          {elsewhere.length ? (
-            <Columns
-              labels={labels}
-              titles={labels}
-              series={elsewhere}
-              format={(n) => `${fmt.pts(n)} pts`}
-              axis={fmt.axis}
-              height={160}
-              caption="Week points per day that no session here explains, by Claude account"
-            />
-          ) : (
-            <p className="muted small">None this week: every limit rise lines up with a session here.</p>
-          )}
-          <p className="muted small">
-            Week points from runs in Actions, claude.ai or the phone. A rise while a session here was working on the same account counts
-            toward that session instead.
-          </p>
         </div>
       </div>
     </section>

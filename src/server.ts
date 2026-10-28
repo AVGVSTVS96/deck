@@ -5,10 +5,9 @@ import { join } from "node:path";
 import type { BunRequest } from "bun";
 import { compressed, webAssets } from "./assets";
 import { loadConfig } from "./config";
-import type { AccountsView, ActionsView } from "./contract";
+import type { AccountsView } from "./contract";
 import { Executor } from "./executor";
 import { Git, GitError } from "./git";
-import { actionsView, github } from "./github";
 import { labelOf, names, whoOf } from "./identity";
 import { liveMap, processes, type Live } from "./live";
 import { plugins, setPlugin } from "./plugins";
@@ -26,7 +25,6 @@ const stream = new Stream();
 const executor = config.executor ? new Executor(config.executor) : null;
 const hub = config.tokenhub ? tokenhub(config.tokenhub) : null;
 const usage = config.tracker ? tracker(config.tracker, config.timezone, () => stream.size > 0) : null;
-const billing = config.github ? github(config.github, () => stream.size > 0) : null;
 const threads = names(config.hex);
 const running = processes(config.claude, config.hex);
 const web = await webAssets(config.web, production);
@@ -63,8 +61,6 @@ hub?.pool.on(() => {
 });
 
 hub?.logs.on(() => stream.stale("accounts"));
-
-billing?.on(() => stream.stale("actions"));
 
 function labels(): Labels {
   return {
@@ -217,16 +213,6 @@ async function accountsRoute(): Promise<AccountsView> {
   };
 }
 
-async function actionsRoute(): Promise<ActionsView> {
-  const accounts = need(billing, "GitHub billing");
-
-  if (accounts.value === undefined) await accounts.ready();
-
-  if (!accounts.value) throw new Error(accounts.error ?? "GitHub billing hasn't loaded yet.");
-
-  return actionsView(accounts.value, (await usage?.get("7d"))?.value, config.timezone);
-}
-
 async function executorRoute() {
   const overview = need(executorOverview, "Executor");
 
@@ -252,8 +238,6 @@ publish();
 
 void usage?.get("7d");
 
-void billing?.refresh();
-
 void executorOverview?.refresh();
 
 const server = Bun.serve({
@@ -264,7 +248,6 @@ const server = Bun.serve({
     "/api/events": (req) => (trusted(req) ? stream.respond() : forbidden()),
     "/api/usage": json(usageRoute),
     "/api/accounts": json(accountsRoute),
-    "/api/actions": json(actionsRoute),
     "/api/accounts/policy": {
       POST: json(async (req) => {
         const body = await req.json();

@@ -142,15 +142,6 @@ export type AccountsView = {
   hosts: { host: string; seenAt: number | null; seats: number }[];
 };
 
-/** The last week by local day, so Actions minutes and limit use from elsewhere line up. */
-export type ActionsView = {
-  /** Oldest first, as YYYY-MM-DD in deck's time zone. */
-  days: string[];
-  github: { user: string; minutes: number; billedUsd: number; error: string | null; repos: { repo: string; minutes: number[] }[] }[];
-  /** Week points of each Claude account's limit that no session here explains: Actions, claude.ai, the phone. */
-  elsewhere: { account: string; points: number[] }[];
-};
-
 export type LiveSession = {
   id: string;
   label: string;

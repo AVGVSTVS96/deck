@@ -30,17 +30,7 @@ export type Tracked = {
   bucket: "1h" | "4h" | "1d" | "1w";
   buckets: number[];
   sessions: TrackedSession[];
-  windows: {
-    account: string;
-    kind: Kind;
-    resetsAt: number;
-    since: number;
-    sampled: number;
-    assigned: number;
-    unassigned: number;
-    /** When each unassigned rise was sampled, and its points. */
-    rises: [at: number, points: number][];
-  }[];
+  windows: { account: string; kind: Kind; resetsAt: number; since: number; sampled: number; assigned: number; unassigned: number }[];
   previous: Amount & { sessions: number };
   devices: { id: string; label: string; syncedAt: number | null }[];
 };
