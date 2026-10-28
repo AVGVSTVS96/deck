@@ -736,7 +736,13 @@ function Detail({ row, picked, state }: { row: UsageRow | null; picked: boolean;
               <ul className="sessions">
                 {sessions.data.rows.map((s) => (
                   <li key={s.key}>
-                    <span className="clip">{s.label}</span>
+                    {s.who?.kind === "action" ? (
+                      <a className="clip" href={s.who.href} target="_blank" rel="noreferrer">
+                        {s.label} ↗
+                      </a>
+                    ) : (
+                      <span className="clip">{s.label}</span>
+                    )}
                     <span className="num">{fmt.tokens(s.amount.tokens)}</span>
                     <span className="num">{fmt.usd(s.amount.apiUsd)}</span>
                     <span className="num muted">{when(s.lastActiveAt)}</span>

@@ -14,7 +14,7 @@ import type {
   UsageView,
   Who,
 } from "./contract";
-import { appOf, labelOf, projectOf, rowOf, whoOf, type Names } from "./identity";
+import { agentOf, appOf, labelOf, projectOf, rowOf, whoOf, type Names } from "./identity";
 import type { Tracked, TrackedSession } from "./tracker";
 
 const RANGES: Range[] = ["today", "yesterday", "7d", "30d", "6m"];
@@ -160,12 +160,15 @@ const named =
 
 /** Each grouping's row key and how its row reads. */
 const GROUPING: Record<GroupBy, { key: (part: Part) => string; describe: (part: Part, labels: Labels) => Description }> = {
-  agent: { key: (part) => part.agent, describe: (part) => ({ ...labelOf(part.who), who: part.who }) },
+  agent: { key: (part) => part.agent, describe: (part) => ({ ...labelOf(part.who), who: agentOf(part.who) }) },
   session: {
     key: (part) => `s:${part.session.key}`,
     describe: ({ session, who }) => ({
       label: session.title ?? labelOf(who).label,
-      detail: [basename(projectOf(session)), session.harness, session.sessionId.slice(0, 8)].join(" · "),
+      detail:
+        who.kind === "action"
+          ? `${who.repo} · ${labelOf(who).detail}`
+          : [basename(projectOf(session)), session.harness, session.sessionId.slice(0, 8)].join(" · "),
       who,
     }),
   },

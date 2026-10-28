@@ -40,6 +40,7 @@ export type Who =
   | { kind: "thread"; app: string; thread: string; name: string; href: string | null }
   | { kind: "job"; owner: string | null; unit: string }
   | { kind: "session"; title: string; project: string; href: string | null }
+  | { kind: "action"; repo: string; workflow: string; run: string | null; href: string }
   | { kind: "project"; project: string };
 
 export type LiveState = "working" | "idle" | "blocked";

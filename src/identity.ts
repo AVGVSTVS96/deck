@@ -17,6 +17,9 @@ export type Session = { sessionId: string; title: string | null; project: string
 
 const JOB = /^(.+)\/([\w.@-]+)$/;
 
+/** tokenhub's GitHub import names each session `github:<run>:<attempt>:…` and titles it `<workflow> #<run>`. */
+const RUN = /^github:(\d+):/;
+
 export function threadLink(app: string, thread: string) {
   if (app === "t3") return `t3-thread://v1/${thread}`;
 
@@ -29,10 +32,19 @@ export function threadLink(app: string, thread: string) {
 
 /**
  * Who a session is, in order:
- * its thread's current session; a past session of a thread, by hex's log; a title that names exactly one thread;
+ * a GitHub Actions run, by tokenhub's session id; its thread's current session; a past session of a thread, by hex's log; a title that names exactly one thread;
  * a bin/job title `<owner>/<unit>`; any other title; else its project. A name alone never joins two threads.
  */
 export function whoOf(names: Names, session: Session): Who {
+  const run = session.sessionId.match(RUN)?.[1];
+
+  if (run) {
+    const repo = projectOf(session).replace(/^https:\/\/github\.com\//, "");
+    const workflow = session.title?.replace(/ #\d+$/, "").trim() || "workflow";
+
+    return { kind: "action", repo, workflow, run, href: `https://github.com/${repo}/actions/runs/${run}` };
+  }
+
   const thread = names.current[session.sessionId] ?? names.logged[session.sessionId.slice(0, 8)];
   const title = session.title?.trim() || null;
   const titled = title ? names.named[title] : undefined;
@@ -59,8 +71,14 @@ export function rowOf(who: Who, sessionKey: string) {
       return `s:${sessionKey}`;
     case "project":
       return `p:${who.project}`;
+    case "action":
+      return `g:${who.repo}:${who.workflow}`;
   }
 }
+
+/** The agent a session ranks under: an Actions run's agent is its workflow, which links to the repo's runs. */
+export const agentOf = (who: Who): Who =>
+  who.kind === "action" ? { ...who, run: null, href: `https://github.com/${who.repo}/actions` } : who;
 
 export function labelOf(who: Who) {
   switch (who.kind) {
@@ -72,10 +90,13 @@ export function labelOf(who: Who) {
       return { label: who.title, detail: basename(who.project) };
     case "project":
       return { label: basename(who.project) || who.project, detail: "untitled sessions" };
+    case "action":
+      return { label: `${basename(who.repo)} · ${who.workflow}`, detail: "GitHub Actions" };
   }
 }
 
-export const appOf = (who: Who) => (who.kind === "thread" ? who.app : who.kind === "job" ? "job" : "other");
+export const appOf = (who: Who) =>
+  who.kind === "thread" ? who.app : who.kind === "job" ? "job" : who.kind === "action" ? "actions" : "other";
 
 type ThreadRow = Thread & { session?: string };
 
