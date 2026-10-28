@@ -19,6 +19,7 @@ export type Config = {
   timezone: string;
   web: string;
   executor: { apps: string; token: string; api: string } | null;
+  github: { users: string[]; vault: string } | null;
 };
 
 type FileConfig = Partial<Omit<Config, "repos" | "tokenhub">> & {
@@ -89,5 +90,6 @@ export async function loadConfig(): Promise<Config> {
           api: file.executor.api,
         }
       : null,
+    github: file.github?.users.length ? file.github : null,
   };
 }

@@ -1199,6 +1199,10 @@ td.share > * {
   gap: 16px;
 }
 
+.account-body > * {
+  min-width: 0;
+}
+
 .facts {
   margin: 0;
   display: grid;
