@@ -177,7 +177,7 @@ function movesOf(attribution: Logged[], recovery: Logged[], since: number): Omit
   return moves.toSorted((a, b) => b.at - a.at);
 }
 
-export type History = Omit<AccountsView, "moves" | "hosts"> & { moves: Omit<Move, "label">[] };
+export type History = Omit<AccountsView, "moves" | "hosts" | "actions"> & { moves: Omit<Move, "label">[] };
 
 /** The Mac and other remote hosts, by when they last reported their seats. Read per request: a heartbeat isn't news. */
 async function hosts(state: string) {

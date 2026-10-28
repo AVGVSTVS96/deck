@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { Account, AccountsView, Connection, Policy, PolicyResult, Pool, UsageView } from "../../src/contract";
+import type { Account, AccountsView, ActionRun, Connection, Policy, PolicyResult, Pool, UsageView } from "../../src/contract";
 import { api, send, useAccounts, useApi } from "../api";
 import { Steps } from "../chart";
 import { Busy, Empty, Link, Meter, STANDING, fmt, toast, useAction, useNow, when } from "../ui";
@@ -38,6 +38,7 @@ export default function Accounts() {
         ))}
       </div>
 
+      {view.data && <Actions runs={view.data.actions} />}
       {pool && <PolicyEditor pool={pool} />}
       {signIn !== null && <SignIn email={signIn} onClose={() => setSignIn(null)} />}
     </div>
@@ -173,6 +174,65 @@ function AccountCard({
           )}
         </div>
       </div>
+    </section>
+  );
+}
+
+/** Claude usage inside GitHub Actions runs, from the capture step in autofork's workflows. */
+function Actions({ runs }: { runs: ActionRun[] }) {
+  const byAccount = Map.groupBy(runs, (r) => r.account);
+
+  return (
+    <section className="section" aria-labelledby="actions-title">
+      <div className="section-head">
+        <h2 id="actions-title">Claude in GitHub Actions</h2>
+        <span className="sub">every run that used Claude</span>
+      </div>
+      {runs.length ? (
+        <>
+          <dl className="facts pad">
+            {[...byAccount].map(([account, rs]) => (
+              <div key={account ?? ""}>
+                <dt>{account ?? "Account not mapped"}</dt>
+                <dd>
+                  {fmt.usd(rs.reduce((n, r) => n + r.costUSD, 0))} · {fmt.tokens(rs.reduce((n, r) => n + r.tokens, 0))} tokens · {rs.length}{" "}
+                  {rs.length === 1 ? "run" : "runs"}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <table className="table">
+            <caption className="sr">Claude usage per Actions run, newest first</caption>
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Account</th>
+                <th className="n">Tokens</th>
+                <th className="n">Cost</th>
+                <th className="n">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r) => (
+                <tr key={r.url}>
+                  <td>
+                    <a href={r.url} target="_blank" rel="noreferrer">
+                      {r.repo.split("/").pop()}
+                    </a>{" "}
+                    <span className="muted">{r.workflow}</span>
+                  </td>
+                  <td className={r.account ? undefined : "muted"}>{r.account ?? "not mapped"}</td>
+                  <td className="n">{fmt.tokens(r.tokens)}</td>
+                  <td className="n">{fmt.usd(r.costUSD)}</td>
+                  <td className="n muted">{when(r.at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : (
+        <Empty>No Actions run has recorded Claude usage yet.</Empty>
+      )}
     </section>
   );
 }

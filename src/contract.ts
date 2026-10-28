@@ -140,6 +140,19 @@ export type AccountsView = {
   history: { account: string; kind: "fiveHour" | "week"; points: [at: number, used: number][] }[];
   moves: Move[];
   hosts: { host: string; seenAt: number | null; seats: number }[];
+  actions: ActionRun[];
+};
+
+/** A GitHub Actions run whose capture step recorded Claude usage; `account` is null when no repo-to-account mapping names it. */
+export type ActionRun = {
+  at: number;
+  repo: string;
+  workflow: string;
+  url: string;
+  account: string | null;
+  tokens: number;
+  costUSD: number;
+  models: string[];
 };
 
 export type LiveSession = {
