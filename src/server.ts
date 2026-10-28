@@ -3,7 +3,6 @@ import { readdir } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import type { BunRequest } from "bun";
-import { actionRuns } from "./actions";
 import { compressed, webAssets } from "./assets";
 import { loadConfig } from "./config";
 import type { AccountsView } from "./contract";
@@ -62,8 +61,6 @@ hub?.pool.on(() => {
 });
 
 hub?.logs.on(() => stream.stale("accounts"));
-
-if (config.tokenhub) watch([{ path: config.tokenhub.state, only: /^github-imported\.json$/ }], () => stream.stale("accounts"));
 
 function labels(): Labels {
   return {
@@ -205,7 +202,6 @@ function sessionLabel(id: string) {
 
 async function accountsRoute(): Promise<AccountsView> {
   const { logs, pool, hosts } = need(hub, "tokenhub");
-  const settings = need(config.tokenhub, "tokenhub");
   const seats = pool.value?.seats ?? [];
 
   if (!logs.value) throw new Error(logs.error ?? "tokenhub's logs haven't loaded yet.");
@@ -214,7 +210,6 @@ async function accountsRoute(): Promise<AccountsView> {
     history: logs.value.history,
     moves: logs.value.moves.map((move) => ({ ...move, label: sessionLabel(move.session) })),
     hosts: (await hosts()).map((h) => ({ ...h, seats: seats.filter((s) => s.host === h.host).length })),
-    actions: await actionRuns(settings.state, config.actions),
   };
 }
 

@@ -19,8 +19,6 @@ export type Config = {
   timezone: string;
   web: string;
   executor: { apps: string; token: string; api: string } | null;
-  /** The Claude account behind each repo's Actions secret, by "owner/repo". */
-  actions: Record<string, string>;
 };
 
 type FileConfig = Partial<Omit<Config, "repos" | "tokenhub">> & {
@@ -91,6 +89,5 @@ export async function loadConfig(): Promise<Config> {
           api: file.executor.api,
         }
       : null,
-    actions: file.actions ?? {},
   };
 }
