@@ -9,7 +9,7 @@ A control room for [hex](https://github.com/AVGVSTVS96/hex) agents. See which ag
 
 - **Usage**: today, yesterday, or longer ranges, with current account capacity as one-click filters. Every hex thread, job and session ranked by tokens, API value, plan cost and share of each account's 5-hour and weekly limits, from [token-tracker](https://github.com/davis7dotsh/token-tracker)'s `GetSessionUsage` read. Group by agent, session, project, model, harness, device or account, filter by any of them, drill into a row's sessions, and export CSV. Selecting a row opens its detail above the ranking. Output and cached reads are shown separately; estimated quota and unmatched readings are labeled explicitly.
 - **Live**: running sessions by app, with their state, account, host and folder, blocked jobs first, and the last day of account moves.
-- **Accounts**: the tokenhub pool in rank order, with each account's limits against its cutoffs, a week of readings, held resets, sign-in expiry and top agents, plus the routing policy with preview and save, and sign-in for new accounts.
+- **Accounts**: the tokenhub pool in rank order, with each account's limits against its cutoffs, a week of readings, held resets, sign-in expiry and top agents, plus the routing policy with preview and save, and sign-in for new accounts. Below the pool, the last week by day: each GitHub account's Actions minutes by repo, read from its billing usage (no repo is touched), and each Claude account's limit use that no session here explains, so a spike from runs in Actions, claude.ai or the phone lines up with the minutes that caused it.
 - **Files**: every configured repo as a file tree, rendered with [`@pierre/trees`](https://www.npmjs.com/package/@pierre/trees) and [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs). The live checkout is read-only. Pressing Edit opens a git worktree on a `deck/<name>` branch, so running sessions keep reading the live files while you work. Edits save as you type. From the side panel you commit (always signed, refused otherwise), ship (rebase onto the live branch if it moved, then fast-forward), push, or remove the worktree. In a repo marked `review`, like hex core, Ship instead pushes the worktree's branch and opens a pull request into the live branch (or returns the one already open), and the live branch is never pushed directly.
 - **Drafts**: a folder of proposed files, each shown as a diff against the live file it would replace, with one button to take it into a worktree.
 - **Plugins**: hex channels, hex mods, and Claude Code plugins, with a switch that turns a Claude Code plugin on or off for new sessions.
@@ -44,21 +44,24 @@ deck reads `~/.config/deck/config.json` (or the path in `DECK_CONFIG`). Every fi
   "drafts": { "dir": "~/drafts", "targets": { "AGENTS.md": "hex:AGENTS.md" } },
   "tracker": "http://127.0.0.1:8787",
   "tokenhub": { "dir": "~/tokenhub", "onboard": "http://127.0.0.1:4888" },
-  "executor": { "apps": "~/executor-apps", "token": "~/.config/executor/token", "api": "https://app.executor.sh" }
+  "executor": { "apps": "~/executor-apps", "token": "~/.config/executor/token", "api": "https://app.executor.sh" },
+  "github": { "users": ["octocat"], "vault": "github-billing" }
 }
 ```
 
-| Field            | What it is                                                                      |
-| ---------------- | ------------------------------------------------------------------------------- |
-| `repos`          | Git repos to browse and edit. `id` appears in URLs.                             |
-| `repos[].review` | Ship opens a pull request (via `gh`) instead of merging into the live checkout. |
-| `worktrees`      | Where deck keeps its worktrees, one folder per repo.                            |
-| `drafts.targets` | Maps a draft's file name to `repo:path` of the live file it replaces.           |
-| `tracker`        | A token-tracker server, for Usage.                                              |
-| `tokenhub.dir`   | A tokenhub checkout, for the account pool; `onboard` is its sign-in server.     |
-| `timezone`       | The time zone Usage buckets days in. Defaults to the system's.                  |
-| `executor.apps`  | A folder with one subfolder per Executor app slug holding its local source.     |
-| `executor.token` | A file holding an Executor API token.                                           |
+| Field            | What it is                                                                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repos`          | Git repos to browse and edit. `id` appears in URLs.                                                                                                  |
+| `repos[].review` | Ship opens a pull request (via `gh`) instead of merging into the live checkout.                                                                      |
+| `worktrees`      | Where deck keeps its worktrees, one folder per repo.                                                                                                 |
+| `drafts.targets` | Maps a draft's file name to `repo:path` of the live file it replaces.                                                                                |
+| `tracker`        | A token-tracker server, for Usage.                                                                                                                   |
+| `tokenhub.dir`   | A tokenhub checkout, for the account pool; `onboard` is its sign-in server.                                                                          |
+| `timezone`       | The time zone Usage buckets days in. Defaults to the system's.                                                                                       |
+| `executor.apps`  | A folder with one subfolder per Executor app slug holding its local source.                                                                          |
+| `executor.token` | A file holding an Executor API token.                                                                                                                |
+| `github.users`   | GitHub accounts whose Actions minutes to show.                                                                                                       |
+| `github.vault`   | The [enclave](https://github.com/AVGVSTVS96/enclave) item holding each account's token under its username: a fine-grained token with read-only Plan. |
 
 `HOST`, `PORT`, `HEX_HOME` and `CLAUDE_CONFIG_DIR` override the matching settings.
 
